@@ -41,4 +41,4 @@ def save_file_metadata(files_list):
     conn.commit()
     conn.close()
 
-    pass
+   
