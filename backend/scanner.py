@@ -51,6 +51,7 @@ def scan_directory(target_path: str, progress_callback=None):
 
                             file_row = (
                                 entry.path,
+                                st.st_size,
                                 int(st.st_mtime),
                                 int(st.st_atime),
                                 1 if entry.is_symlink() else 0,

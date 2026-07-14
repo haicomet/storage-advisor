@@ -26,55 +26,66 @@ from scanner import scan_directory
 
 
 def run_scan(target_path: str) -> int:
-    """Run one full scan of `target_path` and return the new scan_id.
+    # Run one full scan of `target_path` and return the new scan_id.
 
-    Orchestration outline (implement the steps):
+    init_db()
+    started = int(time.time())
+    scan_id = create_scan(target_path, started)
+    total_bytes = 0
 
-    TODO:
-      1. init_db()                          # ensure schema exists
-      2. started = int(time.time())
-      3. scan_id = create_scan(target_path, started)
-      4. total_bytes = 0
-         for batch in scan_directory(target_path, progress_callback=...):
-             insert_file_batch(scan_id, batch)
-             total_bytes += sum(sizes in batch)
-      5. finish_scan(scan_id, int(time.time()), total_bytes)
-      6. prune_old_scans()
-      7. return scan_id
+    try:
+        for batch in scan_directory(target_path, progress_callback=_print_progress):
+            if batch:
+                insert_file_batch(scan_id, batch)
+                total_bytes += sum(row[1] for row in batch) # batch is a list of tuples with size_bytes at idx 1
 
-    Wrap the loop so a failure marks the scan status appropriately rather than
-    leaving it 'running' forever.
-    """
-    # TODO: implement
-    raise NotImplementedError
+            finish_scan(scan_id, int(time.time()), total_bytes, status="complete")
+            print("", file=sys.stderr)
+
+    except Exception as e:
+        finish_scan(scan_id, int(time.time()), total_bytes, status=f"failed: {str(e)}")
+        print(f"\nScan failed: {e}", file=sys.stderr)
+        raise
+    finally:
+        prune_old_scans()
+
+    return scan_id
+
 
 
 def _print_progress(update: dict) -> None:
-    """Simple progress printer for CLI use.
+    # Simple progress printer for CLI use.
 
-    In Phase 2 the sidecar will replace this with a protocol `progress` message
-    (docs/protocol.md). For now, a human-readable line is fine.
+    files_seen = update.get("files_seen", 0)
+    curr_dir = update.get("curr_dir", "")
 
-    NOTE: CLI progress can go to stdout, but get in the habit now — logs to
-    stderr, data to stdout — so Phase 2's stdio channel stays clean.
-
-    TODO: print something like "  scanned 12,000 files..." to stderr
-    """
-    # TODO: implement
-    raise NotImplementedError
+    sys.stderr.write(f"\r Scanned {files_seen:,} files...(Current: {curr_dir[-40:]}) ")
+    sys.stderr.flush()
 
 
 def main(argv: list[str]) -> int:
-    """Parse args, run the scan, print a summary. Returns a process exit code.
+    # Parse args, run the scan, print a summary. Returns a process exit code.
 
-    TODO:
-      - require exactly one arg (the path); print usage to stderr + return 2 if not
-      - call run_scan(path)
-      - print a short summary (scan_id, elapsed) to stderr
-      - return 0 on success
-    """
-    # TODO: implement
-    raise NotImplementedError
+    if len(argv) != 1:
+        print("Usage: python -m backend.scan_cli <target_path>", file=sys.stderr)
+        return 2
+
+    target_path = argv[0]
+
+    print(f"Starting scan of '{target_path}'...", file=sys.stderr)
+
+    try:
+        start_time = time.time()
+        scan_id = run_scan(target_path)
+        elapsed = time.time() - start_time
+
+        print(f"Scan complete! ID: {scan_id} (Took {elapsed:.2f}s)", file=sys.stderr)
+        return 0
+    except KeyboardInterrupt:
+        print("\nScan canceled by user.", file=sys.stderr)
+        return 130
+    except Exception:
+        return 1
 
 
 if __name__ == "__main__":
