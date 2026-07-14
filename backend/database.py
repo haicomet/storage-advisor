@@ -36,58 +36,70 @@ FILE_RETENTION_SCANS = 12
 
 
 def get_db_connection() -> sqlite3.Connection:
-    """Open a connection with the row factory and pragmas this app expects.
+    # Open a connection with the row factory and pragmas this app expects.
 
-    TODO:
-      - connect to DB_PATH
-      - conn.row_factory = sqlite3.Row  (so rows behave like dicts)
-      - execute "PRAGMA foreign_keys = ON"   <-- do NOT skip this
-      - return conn
-    """
-    # TODO: implement
-    raise NotImplementedError
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
 
 
 def init_db() -> None:
-    """Create the `scans` and `files` tables and indexes if absent.
+    # Create the `scans` and `files` tables and indexes if absent.
 
-    Idempotent: safe to call on every startup (use CREATE TABLE IF NOT EXISTS).
 
-    TODO:
-      - CREATE TABLE scans  (id PK, root_path, started_at, finished_at,
-                             status, total_bytes)
-      - CREATE TABLE files  (id PK, scan_id FK -> scans(id), filepath,
-                             size_bytes, last_modified, last_accessed,
-                             is_symlink, inode)
-      - CREATE INDEX on files(scan_id)
-      - CREATE INDEX on files(size_bytes)
-      - CREATE INDEX on files(last_modified)
-        (these three back the "large & stale" query and per-scan lookups)
-    """
-    # TODO: implement
-    raise NotImplementedError
+    with get_db_connection() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS scans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                root_path TEXT NOT NULL,
+                started_at INTEGER NOT NULL,
+                finished_at INTEGER,
+                status TEXT NOT NULL,
+                total_bytes INTEGER
+            )
+        """
+        )
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS files (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scan_id INTEGER NOT NULL,
+                filepath TEXT NOT NULL,
+                size_bytes INTEGER NOT NULL,
+                last_modified INTEGER NOT NULL,
+                last_accessed INTEGER NOT NULL,
+                is_symlink INTEGER NOT NULL,
+                inode INTEGER NOT NULL,
+                FOREIGN KEY(scan_id) REFERENCES scans(id)
+            )
+        """)
+
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_files_scan_id ON files(scan_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_files_size ON files(size_bytes)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_files_last_mod ON files(last_modified)")
 
 
 def create_scan(root_path: str, started_at: int) -> int:
-    """Insert a new scan row (status='running') and return its id.
-
-    The returned id is the `scan_id` every file row for this run gets tagged
-    with. Call this BEFORE scanning so files can reference it.
-
-    TODO: INSERT, then return cursor.lastrowid
-    """
-    # TODO: implement
-    raise NotImplementedError
+    # Insert a new scan row (status='running') and return its id.
+    with get_db_connection() as conn:
+        cursor = conn.execute(
+            "INSERT INTO scans (root_path, started_at, status) VALUES (?, ?, ?)",
+            (root_path, started_at, "running")
+        )
+        return cursor.lastrowid
 
 
 def finish_scan(scan_id: int, finished_at: int, total_bytes: int,
                 status: str = "complete") -> None:
-    """Mark a scan finished and record its summary total.
+    # Mark a scan finished and record its summary total.
 
-    TODO: UPDATE the scans row (finished_at, total_bytes, status) WHERE id=scan_id
-    """
-    # TODO: implement
-    raise NotImplementedError
+    with get_db_connection() as conn:
+        conn.execute(
+            "UPDATE scans SET finished_at = ?, total_bytes = ?, status = ? WHERE id = ?",
+            (finished_at, total_bytes, status, scan_id)
+        )
 
 
 def insert_file_batch(scan_id: int, rows: list[tuple]) -> None:
@@ -96,27 +108,34 @@ def insert_file_batch(scan_id: int, rows: list[tuple]) -> None:
     `rows` is a list of tuples matching the files columns (minus id/scan_id,
     which this function supplies). The scanner streams batches here rather than
     building one giant list, so memory stays flat on a big home directory.
-
-    TODO:
-      - build the INSERT
-      - use executemany for the batch
-      - commit (or let the caller manage the transaction — your design choice;
-        document whichever you pick)
     """
-    # TODO: implement
-    raise NotImplementedError
+
+    batch = [(scan_id,) + row for row in rows]
+
+    with get_db_connection() as conn:
+        conn.executemany(
+            """
+            INSERT INTO files (
+                scan_id, filepath, size_bytes, last_modified, 
+                last_accessed, is_symlink, inode
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            batch
+        )
 
 
 def prune_old_scans(keep: int = FILE_RETENTION_SCANS) -> None:
-    """Delete `files` rows belonging to all but the most recent `keep` scans.
+    # Delete `files` rows belonging to all but the most recent `keep` scans.
 
-    Leaves the `scans` summary rows intact (retention rule, DESIGN.md §4).
-
-    TODO:
-      - find the scan ids to keep (most recent `keep` by id/started_at)
-      - DELETE FROM files WHERE scan_id NOT IN (those)
-      - (foreign keys ON + this manual delete is fine; ON DELETE CASCADE is an
-        alternative worth reading about)
-    """
-    # TODO: implement
-    raise NotImplementedError
+    with get_db_connection() as conn:
+        conn.execute(
+            """
+            DELETE FROM files
+            WHERE scan_id NOT IN (
+                SELECT id FROM scans 
+                ORDER BY started_at DESC 
+                LIMIT ?
+            )
+            """,
+            (keep,)
+        )
