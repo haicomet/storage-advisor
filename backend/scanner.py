@@ -5,33 +5,15 @@ Walks a directory tree and, for each file, records (path, size, mtime, atime,
 is_symlink, inode). Streams results to the database in batches instead of
 returning one giant list, so a big home directory doesn't blow up memory.
 
-MENTOR NOTES
-------------
-- Use `os.scandir`, not `pathlib.rglob`. `os.scandir` yields DirEntry objects
-  that carry stat info from the original syscall, so `entry.stat()` usually costs
-  nothing extra. The old scanner called `.stat()` THREE times per file — that's
-  the bug this rewrite fixes.
-- The filesystem is hostile: permission errors, broken symlinks, files deleted
-  mid-walk, and (on macOS) iCloud placeholders. A single unguarded `.stat()` can
-  kill the whole scan. Guard per-entry and keep going.
-- `os.scandir` does not recurse. You recurse yourself (a stack/queue or a
-  recursive generator). This is deliberate — it lets you skip directories you
-  don't want to descend into (e.g. .Trash, caches) BEFORE walking them.
-- Yield batches, don't accumulate. The `progress_callback` lets the caller report
-  "files_seen" to the UI without the scanner knowing anything about the UI.
 """
 
 import os
 
-# Batch size for streaming rows to the DB. Tune later; a few thousand is a fine
-# starting point (small enough for flat memory, large enough that inserts aren't
-# chatty).
+# Batch size for streaming rows to the DB.
 BATCH_SIZE = 2000
 
-# Directory names to skip entirely (never descend). Start small; grow as you see
-# what pollutes results on a real machine.
+# Directory names to skip entirely
 SKIP_DIRS: set[str] = {
-    # TODO: decide what belongs here, e.g. ".Trash", "node_modules", caches.
     ".Trash",
     "node_modules",
     ".git",
