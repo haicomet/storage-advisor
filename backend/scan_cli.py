@@ -10,8 +10,8 @@ from the terminal, WITHOUT any UI or sidecar wiring.
 import sys
 import time
 
-from database import init_db, create_scan, finish_scan, insert_file_batch, prune_old_scans
-from scanner import scan_directory
+from .database import init_db, create_scan, finish_scan, insert_file_batch, prune_old_scans
+from .scanner import scan_directory
 
 
 def run_scan(target_path: str) -> int:
@@ -28,8 +28,8 @@ def run_scan(target_path: str) -> int:
                 insert_file_batch(scan_id, batch)
                 total_bytes += sum(row[1] for row in batch) # batch is a list of tuples with size_bytes at idx 1
 
-            finish_scan(scan_id, int(time.time()), total_bytes, status="complete")
-            print("", file=sys.stderr)
+        finish_scan(scan_id, int(time.time()), total_bytes, status="complete")
+        print("", file=sys.stderr)
 
     except Exception as e:
         finish_scan(scan_id, int(time.time()), total_bytes, status=f"failed: {str(e)}")
