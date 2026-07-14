@@ -5,25 +5,6 @@ Owns the schema and all reads/writes. Nothing else in the app should talk to
 sqlite3 directly; keeping SQL in one module means when the schema changes, only
 this file changes.
 
-Schema (see DESIGN.md §4):
-
-    scans   one row per scan run — the historical snapshot index.
-            (id, root_path, started_at, finished_at, status, total_bytes)
-    files   one row per file, belonging to a scan via scan_id.
-            (id, scan_id, filepath, size_bytes, last_modified,
-             last_accessed, is_symlink, inode)
-
-Retention (DESIGN.md §4): keep every `scans` row forever (tiny, powers trends);
-keep `files` rows only for the last N scans (default 12) and prune the rest.
-
-MENTOR NOTES
-------------
-- SQLite enforces foreign keys only if you turn them on PER CONNECTION:
-  `PRAGMA foreign_keys = ON`. Forgetting this is the #1 silent bug here.
-- Wrap multi-statement writes in a transaction so a mid-scan crash can't leave a
-  half-written snapshot.
-- Store `total_bytes` ON the scans row at scan time. Then trends never depend on
-  `files` rows that retention may have pruned (ROADMAP Phase 3 pitfall).
 """
 
 import sqlite3

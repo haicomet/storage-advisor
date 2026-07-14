@@ -1,21 +1,10 @@
 """
 scan_cli.py — command-line entry point for a scan.
 
-The point of this file: exercise the whole ingestion pipeline (scanner + database)
-from the terminal, WITHOUT any UI or sidecar wiring. This is what makes Phase 1 a
-runnable milestone — you prove the backend works before Phase 2's harder
-integration.
-
+Exercises the whole ingestion pipeline (scanner + database)
+from the terminal, WITHOUT any UI or sidecar wiring.
     python -m backend.scan_cli /Users/me/Downloads
 
-It's deliberately thin. It orchestrates; the real work lives in scanner.py and
-database.py.
-
-MENTOR NOTE
------------
-Keep the "glue" logic (create scan -> stream batches -> finish -> prune) here and
-in one function you can later reuse from the sidecar. Don't duplicate this
-sequence in main.py in Phase 2 — call into it.
 """
 
 import sys
