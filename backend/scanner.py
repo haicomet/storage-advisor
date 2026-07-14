@@ -32,6 +32,11 @@ BATCH_SIZE = 2000
 # what pollutes results on a real machine.
 SKIP_DIRS: set[str] = {
     # TODO: decide what belongs here, e.g. ".Trash", "node_modules", caches.
+    ".Trash",
+    "node_modules",
+    ".git",
+    "Caches",
+    "System Volume Information"
 }
 
 
@@ -40,34 +45,58 @@ def scan_directory(target_path: str, progress_callback=None):
 
     Yields lists of tuples shaped for `database.insert_file_batch`:
         (filepath, size_bytes, last_modified, last_accessed, is_symlink, inode)
+"""
+    if not os.path.exists(target_path) or not os.path.isdir(target_path):
+        raise ValueError(f"Target path '{target_path}' is not a valid directory.")
 
-    `progress_callback`, if given, is called periodically with a dict like
-    {"files_seen": int, "current_dir": str} — the caller decides what to do with
-    it (print, or later forward as a protocol `progress` message).
+    batch = []
+    files_seen = 0
 
-    A generator (yield) is suggested so the caller can insert each batch as it
-    arrives — but returning a list is acceptable while you're learning; just note
-    the memory tradeoff.
+    dirs_to_visit = [target_path]
 
-    TODO — the core algorithm:
-      1. validate target_path exists and is a directory (return/raise clearly if not)
-      2. walk recursively using os.scandir:
-           - for each entry, guard with try/except (PermissionError,
-             FileNotFoundError, OSError) and `continue` on failure
-           - if entry.is_dir(follow_symlinks=False):
-               skip if name in SKIP_DIRS, else recurse
-           - if entry.is_file(follow_symlinks=False):
-               st = entry.stat()               # ONE stat call
-               build the tuple from st.st_size, st.st_mtime, st.st_atime,
-               st.st_ino, and whether it's a symlink
-               append to the current batch
-      3. when the batch reaches BATCH_SIZE, yield it and start a fresh one
-      4. call progress_callback occasionally (not every file — too chatty)
-      5. yield any final partial batch
+    while dirs_to_visit:
+        curr_dir = dirs_to_visit.pop()
 
-    Think about (don't necessarily solve yet):
-      - symlink loops (follow_symlinks=False avoids the worst of it)
-      - do you count directory sizes, or only files? (files only, per DESIGN.md)
-    """
-    # TODO: implement
-    raise NotImplementedError
+        try:
+            with os.scandir(curr_dir) as it:
+                for entry in it:
+                    try:
+                        if entry.is_dir(follow_symlinks=False):
+                            if entry.name not in SKIP_DIRS:
+                                dirs_to_visit.append(entry.path)
+                        elif entry.is_file(follow_symlinks=False):
+                            st = entry.stat(follow_symlinks=False)
+
+                            file_row = (
+                                entry.path,
+                                int(st.st_mtime),
+                                int(st.st_atime),
+                                1 if entry.is_symlink() else 0,
+                                st.st_ino
+                            )
+
+                            batch.append(file_row)
+                            files_seen += 1
+
+                            if len(batch) >= BATCH_SIZE:
+                                yield batch
+                                batch = []
+
+                            if progress_callback and files_seen % 500 == 0:
+                                progress_callback({
+                                    "files_seen": files_seen,
+                                    "curr_dir": curr_dir
+                                })
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+
+    if batch:
+        yield batch
+
+    if progress_callback:
+      progress_callback({
+          "files_seen": files_seen,
+          "curr_dir": "Finished"
+        })
