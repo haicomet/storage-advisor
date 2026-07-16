@@ -1,49 +1,33 @@
+/**
+ * App.tsx — top-level composition for the MVP: ScanView above ResultsTable.
+ *
+ * Holds the little shared state that connects the two views: when a scan
+ * finishes, fetch the ranked results and hand them to the table. Keep this thin
+ * — per-view state belongs in the components; only the cross-view handoff lives
+ * here.
+ */
+
 import { useState } from "react";
-import reactLogo from "./assets/react.svg";
-import { invoke } from "@tauri-apps/api/core";
+import ScanView from "./components/ScanView";
+import ResultsTable from "./components/ResultsTable";
+import type { FileRow, ScanResult } from "./types";
 import "./App.css";
 
 function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+  const [_results, _setResults] = useState<FileRow[]>([]);
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
+  // TODO: handleScanComplete(result)
+  //   - call api.topLargeStale() and store the rows in results state so the
+  //     table renders. (result carries scan_id/files_seen if you want a summary.)
+  async function handleScanComplete(_result: ScanResult) {
+    // TODO: implement
   }
 
   return (
     <main className="container">
-      <h1>Welcome to Tauri + React</h1>
-
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
-
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
+      <h1>Storage Advisor</h1>
+      <ScanView onScanComplete={handleScanComplete} />
+      <ResultsTable items={_results} />
     </main>
   );
 }
