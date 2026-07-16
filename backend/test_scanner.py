@@ -1,60 +1,82 @@
 """
 test_scanner.py — tests for the filesystem walk.
-
-pytest's `tmp_path` fixture gives each test a fresh temp directory, so tests
-never touch your real files. Build a little fake tree, scan it, assert on what
-comes back.
-
-Run:  pytest backend/test_scanner.py
-
-MENTOR NOTE
------------
-Test the hostile cases, not just the happy path — that's where the real bugs
-live and where a reviewer looks. Each stub below is a behavior worth pinning
-down. Fill in the bodies as you implement scanner.py.
 """
 
-from scanner import scan_directory
-
+import pytest
+from backend.scanner import scan_directory
 
 def _collect(target_path) -> list:
-    """Helper: drain the batch generator into one flat list of rows.
+    """Helper: drain the batch generator into one flat list of rows."""
 
-    TODO: iterate scan_directory(target_path) and extend a list with each batch,
-    so individual tests can just assert on the flat result.
-    """
-    # TODO: implement
-    raise NotImplementedError
+    results = []
+    for batch in scan_directory(target_path):
+        results.extend(batch)
+
+    return results
 
 
 def test_finds_all_files(tmp_path):
     """A flat directory of N files yields N rows."""
-    # TODO: create a couple files, scan, assert len == count
-    raise NotImplementedError
+    (tmp_path / "file1.txt").touch()
+    (tmp_path / "file2.txt").touch()
+    (tmp_path / "file3.txt").touch()
+
+    rows = _collect(str(tmp_path))
+    
+    assert len(rows) == 3
 
 
 def test_recurses_into_subdirectories(tmp_path):
     """Files in nested subfolders are found too (proves recursion)."""
-    # TODO: make tmp_path/sub/deep.txt, scan tmp_path, assert it's included
-    raise NotImplementedError
+    subfolder = tmp_path / "subfolder"
+    subfolder.mkdir()
+    deep_file = subfolder / "deep.txt"
+    deep_file.touch()
+
+    rows = _collect(str(tmp_path))
+
+    assert len(rows) == 1
+    assert rows[0][0] == str(deep_file)
 
 
 def test_captures_metadata(tmp_path):
     """Each row carries size and timestamps, not just the path."""
-    # TODO: write known bytes to a file; assert the row's size_bytes matches
-    raise NotImplementedError
+    test_file = tmp_path / "data.txt"
+    test_file.write_text("Hello World!")
+
+    rows = _collect(str(tmp_path))
+    assert len(rows) == 1
+
+    filepath, size_bytes, mtime, atime, is_symlink, inode = rows[0]
+
+    assert filepath == str(test_file)
+    assert size_bytes == 12
+    assert mtime > 0
+    assert is_symlink == 0
 
 
 def test_skips_unreadable_entries_without_crashing(tmp_path):
     """A permission error on one entry must not abort the whole scan."""
-    # TODO: (harder / optional) chmod a file or dir to unreadable, scan, assert
-    # the scan completes and returns the other files. Skippable while learning —
-    # but this is THE robustness guarantee the product depends on.
-    raise NotImplementedError
+    good_file = tmp_path / "good.txt"
+    good_file.touch()
+    
+    bad_dir = tmp_path / "bad_dir"
+    bad_dir.mkdir()
+    (bad_dir / "hidden.txt").touch()
+    bad_dir.chmod(0o000) # removes all read/write/execute permissions
+
+    try:
+        rows = _collect(str(tmp_path))
+        assert len(rows) == 1
+        assert rows[0][0] == str(good_file)
+    finally:
+        bad_dir.chmod(0o777) # restore perms
 
 
 def test_invalid_path_is_handled(tmp_path):
     """Scanning a nonexistent path fails clearly (no traceback to the user)."""
-    # TODO: scan tmp_path / "does_not_exist"; assert your chosen contract
-    # (empty result, or a raised error you define — decide and test it)
-    raise NotImplementedError
+    bad_path = tmp_path / "does_not_exist"
+
+    with pytest.raises(ValueError, match="not a valid directory"):
+        list(scan_directory(str(bad_path)))
+
