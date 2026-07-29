@@ -2,15 +2,7 @@
 analyzer.py — read-only analytics queries over a scan snapshot.
 
 This module answers product questions ("what is large AND stale?") by querying
-the `files`/`scans` tables that Phase 1 populated. It never writes; it only
-reads and *reshapes* rows into the `file row` dicts defined in docs/protocol.md,
-so main.py can hand them straight to the UI without further transformation.
-
-Design intent (see DESIGN.md §5 and docs/protocol.md):
-  - The flagship insight is "Large & Stale" = large AND stale, ranked by
-    size × age.
-  - Queries return plain dicts shaped like the protocol's `file row`, so the
-    sidecar layer is "wire it up," not "reshape everything."
+the `files`/`scans` tables.
 """
 
 import sqlite3

@@ -19,34 +19,25 @@ Run standalone for manual testing (paste JSON lines on stdin):
 import sys
 import json
 
+from . import database
+from . import scanner
+from . import analyzer
+
 # NOTE: keep imports package-relative so `python -m backend.main` works from the
 # repo root (same fix tracked for scan_cli). e.g. from .analyzer import ...
 
 
 def send(message: dict) -> None:
-    """Write one protocol message to stdout as a single JSON line, then flush.
+    """Write one protocol message to stdout as a single JSON line, then flush."""
 
-    TODO:
-      - json.dumps(message) then write it followed by "\\n".
-      - Flush immediately (print(..., flush=True) or sys.stdout.flush()).
-      - This is the ONLY function allowed to write to stdout. Route everything
-        through it so the "data only + always flush" rules can't be violated
-        accidentally.
-    """
-    # TODO: implement
-    raise NotImplementedError
+    json_str = json.dumps(message)
+    print(json_str, flush=True)
 
 
 def log(message: str) -> None:
-    """Write a human/debug line to stderr (never stdout).
+    """Write a human/debug line to stderr (never stdout)."""
 
-    TODO:
-      - Write to sys.stderr with a trailing newline and flush.
-    Why: stderr is the safe channel for diagnostics; stdout is reserved for
-    protocol JSON only.
-    """
-    # TODO: implement
-    raise NotImplementedError
+    print(message, file=sys.stderr, flush=True)
 
 
 def handle_scan(req_id: str, args: dict) -> None:

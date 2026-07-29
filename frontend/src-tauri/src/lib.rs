@@ -1,60 +1,145 @@
 // lib.rs — Tauri (Rust) shell: spawns the Python sidecar and bridges it to the UI.
-//
-// Responsibilities (ROADMAP Phase 2):
-//   1. Spawn the Python backend as a sidecar child process.
-//   2. Expose #[tauri::command] functions the React app calls via invoke().
-//   3. Write JSON request lines to the sidecar's stdin, read its stdout lines,
-//      and relay `progress` messages to the UI as Tauri events while returning
-//      the terminal `result` to the awaiting invoke().
-//
-// See docs/protocol.md for the wire format. This file is the transport glue; no
-// product logic lives here.
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::io::{BufRead, BufReader, Write};
+use std::process::{Command, Stdio};
+use std::sync::{atomic::{AtomicUsize, Ordering}, Arc, Mutex};
+use std::thread;
+use tauri::{AppHandle, Emitter, Manager, State};
 
-// TODO: sidecar handle
-//   - The Python process is long-lived (one child, many requests). Store its
-//     stdin (and a way to route stdout lines back to the right request id) in
-//     Tauri managed state so commands can reuse it. tauri-plugin-shell's
-//     sidecar() API is the idiomatic spawn path — add it to Cargo.toml and
-//     register the sidecar binary in tauri.conf.json (`externalBin`).
-//   - In `tauri dev` you may run the interpreter directly (python -u
-//     -m backend.main) instead of a bundled binary; defer PyInstaller bundling
-//     to Phase 5 (ROADMAP).
+// stores IPC pipes and routing map safely in memory so Tauri
+// commands can access them across different threads
+type PendingRequests = Arc<Mutex<HashMap<String, std::sync::mpsc::Sender<Result<Value, String>>>>>;
 
-/// Start a scan; stream progress to the UI, resolve with the final result.
-///
-/// TODO:
-///   - Accept `path: String`. Write a {cmd:"scan", args:{path}} request line to
-///     the sidecar stdin.
-///   - For each stdout line: if type=="progress", emit a Tauri event
-///     (e.g. app.emit("scan-progress", data)) the JS api.ts listens for; if
-///     type=="result"/"error", resolve/reject this command.
-///   - Return the result payload (or an Err mapped from the protocol error).
-#[tauri::command]
-fn start_scan(_path: String) -> Result<(), String> {
-    // TODO: implement
-    Err("not implemented".into())
+struct SidecarState {
+    stdin: Mutex<std::process::ChildStdin>,
+    requests: PendingRequests,
 }
 
-/// Query the ranked "Large & Stale" list for the latest scan.
-///
-/// TODO:
-///   - Accept optional limit / stale_months. Send {cmd:"top_large_stale", args}
-///     and return the `items` array from the sidecar's `result` message.
-///   - This is request/response (no progress) — simpler than start_scan.
+fn spawn_sidecar(app: &AppHandle, requests: PendingRequests) -> std::process::ChildStdin {
+    // launches the daemon unbuffered (-u) from the root project directory
+    let mut child = Command::new("python")
+        .args(["-u", "-m", "backend.main"])
+        .current_dir("../../") // step up out of frontend/src-tauri/ to the project root
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit()) // let Python error logs pass straight to our terminal
+        .spawn()
+        .expect("Failed to spawn Python sidecar. Ensure you are running this from the right directory.");
+
+    let stdin = child.stdin.take().expect("Failed to open stdin pipe");
+    let stdout = child.stdout.take().expect("Failed to open stdout pipe");
+    
+    let app_clone = app.clone();
+
+    // spawn a background thread to endlessly read from the Python stdout pipe
+    thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        
+        for line in reader.lines() {
+            let line = match line {
+                Ok(l) => l,
+                Err(_) => break, // EOF received, pipe closed, thread dies cleanly
+            };
+
+            // parse the JSON-over-stdio line
+            if let Ok(msg) = serde_json::from_str::<Value>(&line) {
+                let msg_type = msg["type"].as_str().unwrap_or("");
+                let req_id = msg["id"].as_str().unwrap_or("").to_string();
+
+                if msg_type == "progress" {
+                    // progress events don't resolve a promise. they are broadcasted
+                    // to the entire React app using Tauri's event emitter.
+                    let _ = app_clone.emit("scan-progress", &msg["data"]);
+                } 
+                else if msg_type == "result" {
+                    // find the sleeping React request and wake it up with the data
+                    if let Some(channel) = requests.lock().unwrap().remove(&req_id) {
+                        let _ = channel.send(Ok(msg["data"].clone()));
+                    }
+                } 
+                else if msg_type == "error" {
+                    // find the sleeping React request and wake it up with a failure
+                    if let Some(channel) = requests.lock().unwrap().remove(&req_id) {
+                        let err_msg = msg["error"]["message"].as_str().unwrap_or("Unknown error").to_string();
+                        let _ = channel.send(Err(err_msg));
+                    }
+                }
+            }
+        }
+    });
+
+    stdin
+}
+
+// helper router
+static REQ_COUNTER: AtomicUsize = AtomicUsize::new(1);
+
+fn send_request(
+    cmd: &str,
+    args: Value,
+    state: State<'_, SidecarState>,
+) -> Result<Value, String> {
+    let req_id = format!("req_{}", REQ_COUNTER.fetch_add(1, Ordering::SeqCst));
+    
+    // create a one-time-use channel for this specific request
+    let (tx, rx) = std::sync::mpsc::channel();
+    state.requests.lock().unwrap().insert(req_id.clone(), tx);
+    
+    let payload = json!({
+        "id": req_id,
+        "cmd": cmd,
+        "args": args
+    });
+    
+    let mut req_str = payload.to_string();
+    req_str.push('\n'); // line-delimited JSON requires the newline
+    
+    // lock the stdin pipe, write string, and forcefully flush it
+    {
+        let mut stdin = state.stdin.lock().unwrap();
+        stdin.write_all(req_str.as_bytes()).map_err(|e| e.to_string())?;
+        stdin.flush().map_err(|e| e.to_string())?;
+    }
+    
+    // block this specific command thread until the background listener
+    // drops a response into our channel (Tauri commands run in a threadpool
+    // so this won't freeze the UI)
+    rx.recv().map_err(|_| "Sidecar Python process died unexpectedly".to_string())?
+}
+
+// Tauri commands (exposed to React)
+
 #[tauri::command]
-fn top_large_stale(_limit: Option<u32>, _stale_months: Option<u32>) -> Result<(), String> {
-    // TODO: implement
-    Err("not implemented".into())
+async fn start_scan(_path: String) -> Result<(), String> {
+    send_request("scan", json!({ "path": path }), state)
+}
+
+#[tauri::command]
+async fn top_large_stale(_limit: Option<u32>, _stale_months: Option<u32>) -> Result<(), String> {
+    send_request(
+        "top_large_stale",
+        json!({ "limit": limit, "stale_months": stale_months }),
+        state,
+    )
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        // TODO: register commands once implemented:
-        //   .invoke_handler(tauri::generate_handler![start_scan, top_large_stale])
-        // TODO: spawn the sidecar in .setup() and stash its handle in
-        //   app.manage(...) so the commands above can reach it.
+        .setup(|app| {
+            // when the app starts, spawn the Python daemon and save its
+            // pipes/state into Tauri's managed memory.
+            let requests_map: PendingRequests = Arc::new(Mutex::new(HashMap::new()));
+            let stdin_pipe = spawn_sidecar(app.handle(), requests_map.clone());
+            
+            app.manage(SidecarState {
+                stdin: Mutex::new(stdin_pipe),
+                requests: requests_map,
+            });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
