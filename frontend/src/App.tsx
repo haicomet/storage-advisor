@@ -10,24 +10,35 @@
 import { useState } from "react";
 import ScanView from "./components/ScanView";
 import ResultsTable from "./components/ResultsTable";
+import { topLargeStale } from "./api";
 import type { FileRow, ScanResult } from "./types";
 import "./App.css";
 
 function App() {
   const [_results, _setResults] = useState<FileRow[]>([]);
+  const [hasScanned, setHasScanned] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // TODO: handleScanComplete(result)
-  //   - call api.topLargeStale() and store the rows in results state so the
-  //     table renders. (result carries scan_id/files_seen if you want a summary.)
   async function handleScanComplete(_result: ScanResult) {
-    // TODO: implement
+    setHasScanned(true);
+    setError(null);
+    try {
+      // Fetch the top 50 large & stale files (defaulting to 12 months in the backend)
+      const items = await topLargeStale(50, 12);
+      _setResults(items);
+    } catch (err: any) {
+      setError(err.toString());
+    }
   }
 
   return (
     <main className="container">
       <h1>Storage Advisor</h1>
+      
+      {error && <div className="error-banner">Error fetching results: {error}</div>}
+
       <ScanView onScanComplete={handleScanComplete} />
-      <ResultsTable items={_results} />
+      <ResultsTable items={_results} hasScanned={hasScanned} />
     </main>
   );
 }

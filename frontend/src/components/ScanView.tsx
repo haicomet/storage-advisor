@@ -8,6 +8,7 @@
  */
 
 import { useState } from "react";
+import { startScan } from "../api";
 import type { ScanProgress, ScanResult } from "../types";
 
 interface ScanViewProps {
@@ -15,26 +16,56 @@ interface ScanViewProps {
   onScanComplete: (result: ScanResult) => void;
 }
 
-export default function ScanView({ onScanComplete: _onScanComplete }: ScanViewProps) {
-  const [_path, _setPath] = useState("");
-  const [_progress, _setProgress] = useState<ScanProgress | null>(null);
-  const [_isScanning, _setIsScanning] = useState(false);
+export default function ScanView({ onScanComplete: onScanComplete }: ScanViewProps) {
+  const [path, setPath] = useState("");
+  const [progress, setProgress] = useState<ScanProgress | null>(null);
+  const [isScanning, setIsScanning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // TODO: handleScan()
-  //   - set isScanning true, clear old progress
-  //   - call api.startScan(path, setProgress)
-  //   - on resolve: setIsScanning(false), call onScanComplete(result)
-  //   - on reject: surface the error (permission denied etc.) — do NOT leave the
-  //     UI stuck in a spinner. The denied-permission case is a first-class state
-  //     (ROADMAP Phase 2 pitfalls), not an afterthought.
+  async function handleScan() {
+    setIsScanning(true);
+    setError(null);
+    setProgress({ files_seen: 0, current_dir: "Starting..." });
 
-  // TODO: render
-  //   - idle: a path input + "Scan" button
-  //   - scanning: a progress indicator using progress.files_seen / current_dir
-  //     (indeterminate is fine — total file count is unknown up front)
+    try {
+      const result = await startScan(path, (p) => setProgress(p));
+      onScanComplete(result);
+    } catch (err: any) {
+      setError(err.toString());
+    } finally {
+      setIsScanning(false);
+      setProgress(null);
+    }
+  }
+
   return (
     <section>
-      {/* TODO: scan controls + progress UI */}
+      <div className="scan-controls">
+        <input
+          type="text"
+          value={path}
+          onChange={(e) => setPath(e.target.value)}
+          disabled={isScanning}
+          placeholder="Enter path to scan (e.g. ~/Downloads)"
+        />
+        <button onClick={handleScan} disabled={isScanning || !path.trim()}>
+          {isScanning ? "Scanning..." : "Scan"}
+        </button>
+      </div>
+
+      {/* The denied-permission case is a first-class state */}
+      {error && (
+        <div className="scan-error">
+          <strong>Scan Failed:</strong> {error}
+        </div>
+      )}
+
+      {isScanning && progress && (
+        <div className="progress-display">
+          <p><strong>Files mapped:</strong> {progress.files_seen}</p>
+          <p className="path-truncate"><strong>Current:</strong> {progress.current_dir}</p>
+        </div>
+      )}
     </section>
   );
 }

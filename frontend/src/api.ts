@@ -15,8 +15,8 @@ import type { FileRow, ScanProgress, ScanResult } from "./types";
  * Start a scan of `path`, receiving streamed progress via `onProgress`.
  */
 export async function startScan(
-  _path: string,
-  _onProgress: (p: ScanProgress) => void,
+  path: string,
+  onProgress: (p: ScanProgress) => void,
 ): Promise<ScanResult> {
   // subscribe to the event channel before scan
   // Tauri returns an unlisten functionto clean up later
@@ -38,8 +38,8 @@ export async function startScan(
  * Fetch the ranked "Large & Stale" list for the latest scan.
  */
 export async function topLargeStale(
-  _limit?: number,
-  _staleMonths?: number,
+  limit?: number,
+  staleMonths?: number,
 ): Promise<FileRow[]> {
   // tauri automatically maps JS camelCase (staleMonths) to Rust snake_case (stale_months)
   const response = await invoke<{ items: FileRow[] }>("top_large_stale", {

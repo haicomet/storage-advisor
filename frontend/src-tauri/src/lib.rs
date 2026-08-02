@@ -111,17 +111,34 @@ fn send_request(
 // Tauri commands (exposed to React)
 
 #[tauri::command]
-async fn start_scan(_path: String) -> Result<(), String> {
+async fn start_scan(path: String, state: State<'_, SidecarState>) -> Result<Value, String> {
     send_request("scan", json!({ "path": path }), state)
 }
 
 #[tauri::command]
-async fn top_large_stale(_limit: Option<u32>, _stale_months: Option<u32>) -> Result<(), String> {
+async fn top_large_stale(limit: Option<u32>, stale_months: Option<u32>, state: State<'_, SidecarState>) -> Result<Value, String> {
     send_request(
         "top_large_stale",
         json!({ "limit": limit, "stale_months": stale_months }),
         state,
     )
+}
+
+#[tauri::command]
+fn reveal_in_finder(filepath: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let status = std::process::Command::new("open")
+            .arg("-R")
+            .arg(&filepath)
+            .status()
+            .map_err(|e| format!("Failed to execute 'open': {}", e))?;
+
+        if !status.success() {
+            return Err(format!("macOS could not find or open: {}", filepath));
+        }
+    }
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -140,7 +157,11 @@ pub fn run() {
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![])
+        .invoke_handler(tauri::generate_handler![
+            start_scan,
+            top_large_stale,
+            reveal_in_finder
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

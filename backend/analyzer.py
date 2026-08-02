@@ -7,6 +7,7 @@ the `files`/`scans` tables.
 
 import sqlite3
 import time
+import datetime
 
 # Default thresholds for the "Large & Stale" signal. These are the concrete,
 # user-visible numbers DESIGN.md §5 insists on (no vague adjectives).
