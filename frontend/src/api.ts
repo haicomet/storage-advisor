@@ -8,51 +8,51 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type { FileRow, ScanProgress, ScanResult } from "./types";
 
 /**
  * Start a scan of `path`, receiving streamed progress via `onProgress`.
- *
- * TODO:
- *   - Subscribe to the progress event the Rust side emits (Tauri `listen`),
- *     forwarding each payload to onProgress; unsubscribe when done.
- *   - invoke("start_scan", { path }) and resolve with the final ScanResult.
- *   - Decide the streaming mechanism WITH the Rust side: Tauri events are the
- *     idiomatic way to push progress to the UI while one invoke() is in flight.
  */
 export async function startScan(
-  _path: string,
-  _onProgress: (p: ScanProgress) => void,
+  path: string,
+  onProgress: (p: ScanProgress) => void,
 ): Promise<ScanResult> {
-  // TODO: implement
-  throw new Error("not implemented");
+  // subscribe to the event channel before scan
+  // Tauri returns an unlisten functionto clean up later
+  const unlisten = await listen<ScanProgress>("scan-progress", (event) => {
+    onProgress(event.payload);
+  });
+  try {
+    // trigger the scan, this promise won't resolve until Python finishes
+    const result = await invoke<ScanResult>("start_scan", { path });
+    return result;
+  } finally {
+    // guarantee we clean up the listener whether the scan succeeds or fails,
+    // preventing memory leaks or duplicated progress bars on the next scan
+    unlisten();
+  }
 }
 
 /**
  * Fetch the ranked "Large & Stale" list for the latest scan.
- *
- * TODO:
- *   - invoke("top_large_stale", { limit, staleMonths }) and return FileRow[].
- *   - Keep argument names matching the #[tauri::command] signature (Tauri maps
- *     camelCase JS args to snake_case Rust params — verify the casing).
  */
 export async function topLargeStale(
-  _limit?: number,
-  _staleMonths?: number,
+  limit?: number,
+  staleMonths?: number,
 ): Promise<FileRow[]> {
-  // TODO: implement
-  throw new Error("not implemented");
+  // tauri automatically maps JS camelCase (staleMonths) to Rust snake_case (stale_months)
+  const response = await invoke<{ items: FileRow[] }>("top_large_stale", {
+    limit,
+    staleMonths,
+  });
+  
+  return response.items;
 }
 
 /**
  * Reveal a file in Finder (advise-only; never deletes).
- *
- * TODO:
- *   - Use the Tauri opener plugin (already a dependency) or a Rust command that
- *     runs `open -R <path>` on macOS. This is the only "action" in the MVP and
- *     it is deliberately non-destructive (DESIGN.md §2).
  */
 export async function revealInFinder(_filepath: string): Promise<void> {
-  // TODO: implement
-  throw new Error("not implemented");
+  await invoke("reveal_in_finder", { filepath });
 }

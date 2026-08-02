@@ -18,108 +18,190 @@ Run standalone for manual testing (paste JSON lines on stdin):
 
 import sys
 import json
+import time
+
+from . import database
+from . import scanner
+from . import analyzer
 
 # NOTE: keep imports package-relative so `python -m backend.main` works from the
 # repo root (same fix tracked for scan_cli). e.g. from .analyzer import ...
 
 
 def send(message: dict) -> None:
-    """Write one protocol message to stdout as a single JSON line, then flush.
+    """Write one protocol message to stdout as a single JSON line, then flush."""
 
-    TODO:
-      - json.dumps(message) then write it followed by "\\n".
-      - Flush immediately (print(..., flush=True) or sys.stdout.flush()).
-      - This is the ONLY function allowed to write to stdout. Route everything
-        through it so the "data only + always flush" rules can't be violated
-        accidentally.
-    """
-    # TODO: implement
-    raise NotImplementedError
+    json_str = json.dumps(message)
+    print(json_str, flush=True)
 
 
 def log(message: str) -> None:
-    """Write a human/debug line to stderr (never stdout).
+    """Write a human/debug line to stderr (never stdout)."""
 
-    TODO:
-      - Write to sys.stderr with a trailing newline and flush.
-    Why: stderr is the safe channel for diagnostics; stdout is reserved for
-    protocol JSON only.
-    """
-    # TODO: implement
-    raise NotImplementedError
+    print(message, file=sys.stderr, flush=True)
 
 
 def handle_scan(req_id: str, args: dict) -> None:
-    """Handle a `scan` request: walk the path, stream progress, insert rows, finish.
+    """Handle a `scan` request: walk the path, stream progress, insert rows, finish."""
 
-    Emits: zero or more {type:"progress"} messages, then exactly one
-    {type:"result"} (scan_id, files_seen, duration_ms) or {type:"error"}.
+    target_path = args.get("path")
+    if not target_path:
+        send({
+            "id": req_id,
+            "type": "error",
+            "error": {"code": "INVALID_ARGS", "message": "Missing 'path' argument"}
+        })
+        return
 
-    TODO:
-      - Read `path` from args; validate it.
-      - init_db(); create_scan(); iterate scan_directory(path, progress_callback=...)
-        where the callback maps the scanner's dict into a protocol `progress`
-        message and calls send(). Insert each batch via insert_file_batch().
-      - On success: finish_scan(...) then send one `result`. On failure: set the
-        scan status failed and send one `error` (map PermissionError ->
-        code "PERMISSION_DENIED", etc.). prune_old_scans() at the end.
-      - Reuse the pipeline you already proved in scan_cli.py — this is that logic
-        with protocol messages instead of stderr prints. Consider extracting the
-        shared run into one place so CLI and sidecar don't drift.
-    """
-    # TODO: implement
-    raise NotImplementedError
+    log(f"[scan] Starting scan of {target_path}")
+    database.init_db()
+    started_at = int(time.time())
+    scan_id = database.create_scan(target_path, started_at)
+    total_bytes = 0
+
+    # The callback maps the scanner's raw dict into a valid protocol progress message
+    def _progress_cb(update: dict):
+        send({
+            "id": req_id,
+            "type": "progress",
+            "data": update
+        })
+
+    try:
+        start_time = time.time()
+        
+        # Iterate over the batched results from the scanner
+        for batch in scanner.scan_directory(target_path, progress_callback=_progress_cb):
+            if batch:
+                database.insert_file_batch(scan_id, batch)
+                total_bytes += sum(row[1] for row in batch)  # row[1] is size_bytes
+
+        duration_ms = int((time.time() - start_time) * 1000)
+        database.finish_scan(scan_id, int(time.time()), total_bytes, status="complete")
+        
+        # On success, send one terminal result message
+        send({
+            "id": req_id,
+            "type": "result",
+            "data": {
+                "scan_id": scan_id,
+                "duration_ms": duration_ms,
+                "total_bytes": total_bytes
+            }
+        })
+        log(f"[scan] Complete. Took {duration_ms}ms")
+
+    except Exception as e:
+        log(f"[scan] Failed: {e}")
+        database.finish_scan(scan_id, int(time.time()), total_bytes, status=f"failed: {str(e)}")
+        
+        # Map permission errors specifically, otherwise default to a generic error
+        error_code = "PERMISSION_DENIED" if isinstance(e, PermissionError) else "SCAN_ERROR"
+        send({
+            "id": req_id,
+            "type": "error",
+            "error": {"code": error_code, "message": str(e)}
+        })
+    finally:
+        database.prune_old_scans()
 
 
 def handle_top_large_stale(req_id: str, args: dict) -> None:
-    """Handle a `top_large_stale` request: query and return ranked file rows.
-
-    Emits exactly one {type:"result", data:{items:[file row, ...]}}.
-
-    TODO:
-      - Pull optional `limit` / `stale_months` from args (fall back to defaults).
-      - Open a connection, call analyzer.top_large_stale(...), send the list back
-        under data.items. No progress messages — this is a fast read.
-    """
-    # TODO: implement
-    raise NotImplementedError
+    """Handle a `top_large_stale` request: query and return ranked file rows."""
+    log("[top_large_stale] Fetching insights...")
+    
+    limit = args.get("limit", analyzer.DEFAULT_LIMIT)
+    stale_months = args.get("stale_months", analyzer.DEFAULT_STALE_MONTHS)
+    min_size_bytes = args.get("min_size_bytes", analyzer.DEFAULT_MIN_SIZE_BYTES)
+    
+    try:
+        with database.get_db_connection() as conn:
+            items = analyzer.top_large_stale(
+                conn,
+                limit=limit, 
+                stale_months=stale_months, 
+                min_size_bytes=min_size_bytes
+            )
+            
+        send({
+            "id": req_id,
+            "type": "result",
+            "data": {"items": items}
+        })
+        
+    except Exception as e:
+        log(f"[top_large_stale] Error: {e}")
+        send({
+            "id": req_id,
+            "type": "error",
+            "error": {"code": "QUERY_ERROR", "message": str(e)}
+        })
 
 
 # Maps a protocol `cmd` string to its handler. Add `trends` here in Phase 3.
 COMMANDS = {
-    # "scan": handle_scan,
-    # "top_large_stale": handle_top_large_stale,
+    "scan": handle_scan,
+    "top_large_stale": handle_top_large_stale,
 }
 
 
 def dispatch(request: dict) -> None:
-    """Route one parsed request dict to the right handler.
+    """Route one parsed request dict to the right handler."""
+    req_id = request.get("id")
+    cmd = request.get("cmd")
+    args = request.get("args", {})
 
-    TODO:
-      - Read `id`, `cmd`, `args` from the request.
-      - Look `cmd` up in COMMANDS; if unknown, send an `error` (e.g. code
-        "UNKNOWN_COMMAND") rather than crashing the loop.
-      - Wrap the handler call so one bad request produces an `error` message,
-        not a dead sidecar (a crash here takes down every future request too).
-    """
-    # TODO: implement
-    raise NotImplementedError
+    if not req_id or not cmd:
+        send({
+            "id": req_id or "unknown",
+            "type": "error",
+            "error": {"code": "BAD_REQUEST", "message": "Requests must contain 'id' and 'cmd'"}
+        })
+        return
+
+    handler = COMMANDS.get(cmd)
+    if not handler:
+        send({
+            "id": req_id,
+            "type": "error",
+            "error": {"code": "UNKNOWN_COMMAND", "message": f"Command '{cmd}' not found"}
+        })
+        return
+
+    try:
+        handler(req_id, args)
+    except Exception as e:
+        log(f"[dispatch] Unhandled exception in {cmd}: {e}")
+        send({
+            "id": req_id,
+            "type": "error",
+            "error": {"code": "INTERNAL_ERROR", "message": str(e)}
+        })
 
 
 def main() -> int:
-    """Read stdin line by line, parse JSON, dispatch. Runs until stdin closes.
-
-    TODO:
-      - Loop over sys.stdin. Skip blank lines. json.loads each line inside a
-        try/except so a single malformed line sends an `error` and continues.
-      - Call dispatch() per request. Return 0 when stdin reaches EOF (Tauri
-        closed the pipe / app is quitting).
-    Design note: this is a plain synchronous loop on purpose — DESIGN.md §3 says
-    NOT to reach for asyncio. One request at a time, streaming progress, is
-    simpler and correct for a single-user disk walk.
-    """
-    # TODO: implement
-    raise NotImplementedError
+    """Read stdin line by line, parse JSON, dispatch. Runs until stdin closes."""
+    log("Storage Advisor Sidecar started. Waiting for requests...")
+    
+    # Loop over sys.stdin blockingly. Runs one request at a time.
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+            
+        try:
+            request = json.loads(line)
+            dispatch(request)
+        except json.JSONDecodeError:
+            log("[main] Received malformed JSON string")
+            send({
+                "id": "unknown",
+                "type": "error",
+                "error": {"code": "PARSE_ERROR", "message": "Invalid JSON payload"}
+            })
+            
+    log("Stdin pipe closed. Exiting.")
+    return 0
 
 
 if __name__ == "__main__":

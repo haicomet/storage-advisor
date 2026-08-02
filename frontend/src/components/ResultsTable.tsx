@@ -8,25 +8,71 @@
  */
 
 import type { FileRow } from "../types";
+import { revealInFinder } from "../api";
 
 interface ResultsTableProps {
   items: FileRow[];
-  // TODO: consider loading/empty flags so the table can show "no results yet"
-  // vs. "scan found nothing large & stale" — they mean different things.
+  hasScanned: boolean;
 }
 
-export default function ResultsTable({ items }: ResultsTableProps) {
-  // TODO: handleReveal(filepath)
-  //   - call api.revealInFinder(filepath); this is advise-only (no delete).
+export default function ResultsTable({ items, hasScanned }: ResultsTableProps) {
+  if (!hasScanned) {
+    return (
+      <section className="empty-state">
+        <p>Enter a path above and click Scan to find large, stale files.</p>
+      </section>
+    );
+  }
 
-  // TODO: render
-  //   - empty state when items.length === 0 (see DESIGN.md: don't look broken)
-  //   - a table row per item: filepath, size_human, evidence, Reveal button
-  //   - keep it simple; sorting/filtering is out of scope for the MVP view
+  if (items.length === 0) {
+    return (
+      <section className="empty-state success">
+        <p>Scan complete! No files found matching the "Large & Stale" criteria.</p>
+      </section>
+    );
+  }
+
   return (
-    <section>
-      {/* TODO: results table */}
-      {items.length === 0 ? null : null}
+    <section className="results-panel">
+      <h2>Large & Stale Files ({items.length})</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Size</th>
+            <th>File</th>
+            <th>Evidence</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item, i) => (
+            <tr key={i}>
+              <td className="bold">{item.size_human}</td>
+              
+              <td className="path-truncate" title={item.filepath}>
+                {item.filepath.split('/').pop()}
+              </td>
+              
+              <td className="evidence-col">{item.evidence}</td>
+              
+              <td>
+                <button 
+                  onClick={async () => {
+                    try {
+                      console.log("Attempting to reveal:", item.filepath);
+                      await revealInFinder(item.filepath);
+                    } catch (err) {
+                      alert(`Could not reveal file:\n${err}`);
+                    }
+                  }}
+                >
+                  Reveal
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </section>
   );
 }

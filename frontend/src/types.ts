@@ -28,5 +28,7 @@ export interface ScanResult {
   duration_ms: number;
 }
 
-// TODO: add an error shape ({ code, message }) once you decide how the Rust
-// layer surfaces protocol errors to JS (rejected promise vs. event).
+export interface ProtocolError {
+  code: string;
+  message: string;
+}
