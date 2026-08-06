@@ -88,17 +88,18 @@ def _human_size(size_bytes: int) -> str:
     """Format a byte count as a short human string (e.g. 4509715660 -> "4.2 GB")."""
 
     base = 1000.0
-    
+
     if size_bytes < base:
         return f"{size_bytes} B"
 
+    size = float(size_bytes)
     for unit in ['KB', 'MB', 'GB', 'TB']:
-        if size_bytes < base:
-          formatted = f"{size_bytes:.1f}".rstrip('0').rstrip('.')
-          return f"{formatted} {unit}"
-        size_bytes /= base
+        size /= base
+        if size < base:
+            formatted = f"{size:.1f}".rstrip('0').rstrip('.')
+            return f"{formatted} {unit}"
 
-    return f"{size_bytes:.1f} PB"
+    return f"{size:.1f} PB"
 
 
 def _format_evidence(size_bytes: int, last_modified: int) -> str:

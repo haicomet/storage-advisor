@@ -68,7 +68,7 @@ def scan_directory(target_path: str, progress_callback=None):
                             if progress_callback and files_seen % 500 == 0:
                                 progress_callback({
                                     "files_seen": files_seen,
-                                    "curr_dir": curr_dir
+                                    "current_dir": curr_dir
                                 })
                     except OSError:
                         continue
@@ -81,5 +81,5 @@ def scan_directory(target_path: str, progress_callback=None):
     if progress_callback:
       progress_callback({
           "files_seen": files_seen,
-          "curr_dir": "Finished"
+          "current_dir": "Finished"
         })

@@ -53,6 +53,6 @@ export async function topLargeStale(
 /**
  * Reveal a file in Finder (advise-only; never deletes).
  */
-export async function revealInFinder(_filepath: string): Promise<void> {
+export async function revealInFinder(filepath: string): Promise<void> {
   await invoke("reveal_in_finder", { filepath });
 }
