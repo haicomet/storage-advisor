@@ -142,19 +142,34 @@ def handle_top_large_stale(req_id: str, args: dict) -> None:
 
 
 def handle_trends(req_id: str, args: dict) -> None:
-    """Handle a `trends` request: return total-size-per-scan over history.
+    """Handle a `trends` request: return total-size-per-scan over history."""
+    log("[trends] Fetching historical scan trends...")
+    
+    # Pull optional limit, defaulting to None if not provided
+    limit = args.get("limit")
+    
+    try:
+        with database.get_db_connection() as conn:
+            points = analyzer.scan_trends(
+                conn,
+                limit=limit
+            )
+            
+        send({
+            "id": req_id,
+            "type": "result",
+            "data": {"points": points}
+        })
+        log(f"[trends] Returned {len(points)} trend points")
+        
+    except Exception as e:
+        log(f"[trends] Error: {e}")
+        send({
+            "id": req_id,
+            "type": "error",
+            "error": {"code": "QUERY_ERROR", "message": str(e)}
+        })
 
-    Emits exactly one {type:"result", data:{points:[trend point, ...]}}.
-
-    TODO:
-      - Pull an optional `limit` from args (fall back to None / a default).
-      - Open a connection, call analyzer.scan_trends(conn, limit=...), send the
-        list back under data.points. No progress messages — a fast read.
-      - Mirror handle_top_large_stale's error handling: on exception, log it and
-        send a QUERY_ERROR error message rather than letting it bubble.
-    """
-    # TODO: implement
-    raise NotImplementedError
 
 
 # Maps a protocol `cmd` string to its handler.
