@@ -29,9 +29,8 @@ function App() {
       const items = await topLargeStale(50, 12);
       _setResults(items);
 
-      // TODO: also refresh the trends chart so it picks up the scan just finished
-      //   const points = await getTrends();
-      //   setTrends(points);
+      const points = await getTrends();
+      setTrends(points);
     } catch (err: any) {
       setError(err.toString());
     }
@@ -44,8 +43,8 @@ function App() {
       {error && <div className="error-banner">Error fetching results: {error}</div>}
 
       <ScanView onScanComplete={handleScanComplete} />
-      <ResultsTable items={_results} hasScanned={hasScanned} />
       <TrendsView points={trends} />
+      <ResultsTable items={_results} hasScanned={hasScanned} />
     </main>
   );
 }
