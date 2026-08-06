@@ -46,7 +46,7 @@ def _print_progress(update: dict) -> None:
     # Simple progress printer for CLI use.
 
     files_seen = update.get("files_seen", 0)
-    curr_dir = update.get("curr_dir", "")
+    curr_dir = update.get("current_dir", "")
 
     sys.stderr.write(f"\r Scanned {files_seen:,} files...(Current: {curr_dir[-40:]}) ")
     sys.stderr.flush()

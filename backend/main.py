@@ -58,6 +58,7 @@ def handle_scan(req_id: str, args: dict) -> None:
     started_at = int(time.time())
     scan_id = database.create_scan(target_path, started_at)
     total_bytes = 0
+    files_seen = 0
 
     # The callback maps the scanner's raw dict into a valid protocol progress message
     def _progress_cb(update: dict):
@@ -75,6 +76,7 @@ def handle_scan(req_id: str, args: dict) -> None:
             if batch:
                 database.insert_file_batch(scan_id, batch)
                 total_bytes += sum(row[1] for row in batch)  # row[1] is size_bytes
+                files_seen += len(batch)
 
         duration_ms = int((time.time() - start_time) * 1000)
         database.finish_scan(scan_id, int(time.time()), total_bytes, status="complete")
@@ -85,6 +87,7 @@ def handle_scan(req_id: str, args: dict) -> None:
             "type": "result",
             "data": {
                 "scan_id": scan_id,
+                "files_seen": files_seen,
                 "duration_ms": duration_ms,
                 "total_bytes": total_bytes
             }
