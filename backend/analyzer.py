@@ -84,6 +84,38 @@ def top_large_stale(
     return results
 
 
+def scan_trends(conn: sqlite3.Connection, *, limit: int | None = None) -> list[dict]:
+    """Return total storage size per completed scan over time, for the trends chart.
+
+    Each returned dict is one point on the chart:
+        {
+          "scan_id": int,
+          "started_at": int,        # epoch seconds — the x-axis
+          "total_bytes": int,       # the y-axis
+          "total_human": str,       # e.g. "4.2 GB" — for tooltips/labels
+        }
+    Ordered oldest → newest so the chart reads left-to-right in time.
+
+    TODO:
+      - SELECT id, root_path, started_at, finished_at, total_bytes FROM scans
+        WHERE status = 'complete'
+        ORDER BY started_at ASC
+        (optionally LIMIT to the most recent `limit` — but note ordering: if you
+        LIMIT, you want the most RECENT N, then still display them oldest-first.)
+      - Filter to status = 'complete' on purpose: failed scans carry a partial
+        total_bytes (main.py sets it before marking the scan failed), which would
+        show up as a misleading dip in the trend.
+      - Map each row to the dict above, reusing _human_size() for total_human.
+      - Return [] when there are no completed scans (empty state, never raise).
+    Design note (see DESIGN.md §4 / ROADMAP Phase 3 pitfall): read from `scans`,
+    NOT `files`. Per-file rows are pruned beyond the last 12 scans, but `scans`
+    summary rows (incl. total_bytes) live forever — so the trend spans full
+    history only if it never touches `files`.
+    """
+    # TODO: implement
+    raise NotImplementedError
+
+
 def _human_size(size_bytes: int) -> str:
     """Format a byte count as a short human string (e.g. 4509715660 -> "4.2 GB")."""
 

@@ -151,3 +151,35 @@ def test_top_large_stale_rows_match_protocol_shape(tmp_path, monkeypatch):
     with database.get_db_connection() as conn:
         row = analyzer.top_large_stale(conn, now=now)[0]
     assert set(row) == {"filepath", "size_bytes", "last_modified", "size_human", "evidence"}
+
+
+# --- scan_trends (Phase 3) ---------------------------------------------------
+
+def test_trends_empty_when_no_scans(tmp_path, monkeypatch):
+    """No completed scans -> [] so the UI shows an empty state, not a broken chart."""
+    _fresh_db(tmp_path, monkeypatch)
+    # TODO: open a connection, call analyzer.scan_trends(conn), assert == []
+    raise NotImplementedError
+
+
+def test_trends_ordered_oldest_to_newest(tmp_path, monkeypatch):
+    """Points come back ascending by started_at, with the right total_bytes each."""
+    # TODO: _seed_scan three times with distinct started_at (e.g. 1000/2000/3000)
+    #   and distinct total sizes; call scan_trends; assert the returned started_at
+    #   sequence is strictly increasing and total_bytes matches what was seeded.
+    raise NotImplementedError
+
+
+def test_trends_excludes_incomplete_scans(tmp_path, monkeypatch):
+    """running/failed scans (partial totals) must NOT appear as trend points."""
+    # TODO: seed one status="complete" scan and one status="running" (or
+    #   "failed: ..."); assert only the complete one is in the result. Mirrors
+    #   test_latest_scan_id_ignores_incomplete.
+    raise NotImplementedError
+
+
+def test_trends_rows_match_shape(tmp_path, monkeypatch):
+    """Each point carries exactly the fields the chart/types.ts expect."""
+    # TODO: seed one complete scan; assert set(point) ==
+    #   {"scan_id", "started_at", "total_bytes", "total_human"}
+    raise NotImplementedError
