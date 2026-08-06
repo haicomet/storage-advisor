@@ -32,3 +32,12 @@ export interface ProtocolError {
   code: string;
   message: string;
 }
+
+// One point on the trends chart: total storage size at one scan in history.
+// Mirrors analyzer.scan_trends() output (see docs/protocol.md).
+export interface TrendPoint {
+  scan_id: number;
+  started_at: number; // epoch seconds — chart x-axis
+  total_bytes: number; // chart y-axis
+  total_human: string; // e.g. "4.2 GB" — tooltip/label
+}

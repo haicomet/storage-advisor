@@ -125,6 +125,13 @@ async fn top_large_stale(limit: Option<u32>, stale_months: Option<u32>, state: S
 }
 
 #[tauri::command]
+async fn get_trends(state: State<'_, SidecarState>) -> Result<Value, String> {
+    // Forward to the Python sidecar's `trends` command. No args for the MVP.
+    // Modeled on top_large_stale; returns the raw { points: [...] } result Value.
+    send_request("trends", json!({}), state)
+}
+
+#[tauri::command]
 fn reveal_in_finder(filepath: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
@@ -160,6 +167,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             start_scan,
             top_large_stale,
+            get_trends,
             reveal_in_finder
         ])
         .run(tauri::generate_context!())

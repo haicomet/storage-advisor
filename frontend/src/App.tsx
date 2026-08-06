@@ -10,12 +10,14 @@
 import { useState } from "react";
 import ScanView from "./components/ScanView";
 import ResultsTable from "./components/ResultsTable";
-import { topLargeStale } from "./api";
-import type { FileRow, ScanResult } from "./types";
+import TrendsView from "./components/TrendsView";
+import { topLargeStale, getTrends } from "./api";
+import type { FileRow, ScanResult, TrendPoint } from "./types";
 import "./App.css";
 
 function App() {
   const [_results, _setResults] = useState<FileRow[]>([]);
+  const [trends, setTrends] = useState<TrendPoint[]>([]);
   const [hasScanned, setHasScanned] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -26,6 +28,10 @@ function App() {
       // Fetch the top 50 large & stale files (defaulting to 12 months in the backend)
       const items = await topLargeStale(50, 12);
       _setResults(items);
+
+      // TODO: also refresh the trends chart so it picks up the scan just finished
+      //   const points = await getTrends();
+      //   setTrends(points);
     } catch (err: any) {
       setError(err.toString());
     }
@@ -34,11 +40,12 @@ function App() {
   return (
     <main className="container">
       <h1>Storage Advisor</h1>
-      
+
       {error && <div className="error-banner">Error fetching results: {error}</div>}
 
       <ScanView onScanComplete={handleScanComplete} />
       <ResultsTable items={_results} hasScanned={hasScanned} />
+      <TrendsView points={trends} />
     </main>
   );
 }

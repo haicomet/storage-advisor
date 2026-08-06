@@ -101,3 +101,14 @@ def test_top_large_stale_returns_items_list(sent, tmp_path):
     assert terminal["type"] == "result"
     assert "items" in terminal["data"]
     assert any(item["filepath"].endswith("big.bin") for item in terminal["data"]["items"])
+
+
+# --- handle_trends (Phase 3) -------------------------------------------------
+
+def test_trends_returns_points_list(sent, tmp_path):
+    """After a scan, the trends command returns a result with a points list."""
+    # TODO: scan a subdir (so the test DB isn't counted — see
+    #   test_scan_streams_progress_then_result), then main.handle_trends("r2", {}).
+    #   Assert sent[-1]["type"] == "result" and "points" in sent[-1]["data"], and
+    #   that the point's total_bytes matches the scanned bytes.
+    raise NotImplementedError

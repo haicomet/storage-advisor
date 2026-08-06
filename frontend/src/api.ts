@@ -9,7 +9,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { FileRow, ScanProgress, ScanResult } from "./types";
+import type { FileRow, ScanProgress, ScanResult, TrendPoint } from "./types";
 
 /**
  * Start a scan of `path`, receiving streamed progress via `onProgress`.
@@ -55,4 +55,18 @@ export async function topLargeStale(
  */
 export async function revealInFinder(filepath: string): Promise<void> {
   await invoke("reveal_in_finder", { filepath });
+}
+
+/**
+ * Fetch total-storage-size-per-scan over history for the trends chart.
+ *
+ * TODO:
+ *   - invoke<{ points: TrendPoint[] }>("get_trends") and return response.points
+ *     (mirror topLargeStale, which unwraps the { items } envelope).
+ *   - No args needed for the MVP; add an optional `limit?: number` later if the
+ *     Rust command grows one.
+ */
+export async function getTrends(): Promise<TrendPoint[]> {
+  // TODO: implement
+  throw new Error("not implemented");
 }
