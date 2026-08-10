@@ -1,231 +1,231 @@
 # Storage Advisor — Development Roadmap
 
-> Companion to `DESIGN.md` (the what/why). This is the how/when: phases that each end in a
-> **runnable, demoable milestone**. Phase numbers match DESIGN.md §7.
-> Difficulty is rated for a rising-junior CS major learning Python: ★ easy → ★★★★★ hard.
+> Companion to `DESIGN.md` (the what and why). This document covers the how and
+> when: phases that each end in a runnable, demonstrable milestone. Phase numbers
+> match DESIGN.md §8.
+>
+> **Version:** aligned to DESIGN.md v0.3 (2026-08-10). Phases 1–3 are carried
+> forward from earlier versions; Phases 4–8 reflect the v0.3 direction (ongoing
+> companion: monitoring, footprint, safe actions, offload).
 
-**Guiding rule:** every phase must leave `main` in a state you could screen-record. If a phase
-doesn't produce something you can *show*, it's too big — split it.
-
----
-
-## Phase 0 — Foundations & hygiene
-
-**Goal:** a clean, reproducible project you can hand to another machine and run.
-
-**Features / deliverables**
-- Minimal pinned `requirements.txt` (replace the conda dump).
-- A `README` "how to run" section (backend + frontend dev commands).
-- Decide and *document* the JSON-over-stdio message shapes (request / progress / result / error).
-- `.gitignore` covers `*.db`, `__pycache__`, `node_modules`, Tauri build output.
-
-**Files/modules**
-- `backend/requirements.txt`, `README.md`, `.gitignore`
-- `docs/protocol.md` (new) — the stdio contract, even just as examples.
-
-**Depends on:** nothing.
-
-**Learn first**
-- `pip freeze` vs. a hand-curated `requirements.txt`; why the current file's `file:///` paths
-  break portability.
-- Virtual environments (`python -m venv`), so your deps are isolated.
-
-**Difficulty:** ★
-**Pitfalls**
-- Don't `pip freeze` your whole global env again — list only what you import (`pytest`, and
-  later nothing heavy).
-- Committing `storage_advisor.db` — add it to `.gitignore` now.
+**Guiding rule:** every phase must leave `main` in a state that could be
+demonstrated end to end. A phase that produces nothing observable is too large and
+should be split.
 
 ---
 
-## Phase 1 — Ingestion that supports the product
+## Phase 1 — Ingestion — **complete**
 
-**Goal:** run one command, scan a real directory, and end up with a correct, queryable
-snapshot in SQLite — robustly (no crash on permissions/symlinks).
+**Goal:** run a scan and produce a correct, queryable snapshot in SQLite, robust to
+permission and symlink errors.
+
+**Delivered**
+- Schema: `scans` + `files` with foreign key, indexes, and retention (all `scans`
+  kept; `files` pruned beyond the last N = 12).
+- Scanner on `os.scandir`: one `stat` per entry, per-entry error handling, batched
+  inserts, streamed progress.
+- CLI entry point for exercising the pipeline without a UI.
+
+**Files:** `backend/database.py`, `backend/scanner.py`, `backend/scan_cli.py`,
+`backend/test_scanner.py`, `backend/test_database.py`.
+
+---
+
+## Phase 2 — Large & Stale insight, end to end — **complete**
+
+**Goal:** the first demonstrable version — scan, watch progress, see a ranked
+"Large & Stale" list with evidence, reveal a file in Finder. Advise-only.
+
+**Delivered**
+- Analytics query: large *and* stale (`mtime`-based), ranked by `size × age`, with
+  human-readable evidence.
+- Sidecar protocol implemented: line-delimited JSON over stdio; a streaming `scan`
+  command and a `top_large_stale` query.
+- Rust glue: sidecar spawn, request routing, progress relay to the UI.
+- React UI: scan controls, progress, results table, reveal in Finder.
+
+**Files:** `backend/analyzer.py`, `backend/main.py`,
+`frontend/src-tauri/src/lib.rs`, `frontend/src/App.tsx`, `ScanView`,
+`ResultsTable`, `api.ts`.
+
+---
+
+## Phase 3 — Trends over time — **in progress**
+
+**Goal:** show storage growth across scans ("storage grew 8 GB since April").
 
 **Features**
-- New schema: `scans` + `files` with foreign key and indexes (DESIGN.md §4).
-- Retention: keep all `scans`, prune `files` beyond last N=12.
-- Rewrite scanner on `os.scandir`: one stat per entry, per-file `try/except`, skip
-  unreadable/broken entries, batch inserts (e.g. 1–5k rows), progress callback.
-- A tiny CLI entry (`python -m backend.scan <path>`) so you can exercise it before any UI.
+- Query total size per completed scan over history.
+- A trends view: a line/area chart of storage over scan history.
 
 **Files/modules**
-- `backend/database.py` (schema + upsert/prune + batched insert)
-- `backend/scanner.py` (rewrite)
-- `backend/scan_cli.py` (new, thin)
-- `backend/test_scanner.py`, `backend/test_database.py` (new)
+- `backend/analyzer.py` — `scan_trends` query (implemented).
+- `backend/main.py` — `trends` command handler (implemented).
+- `frontend/src/components/TrendsView.tsx` — chart (implemented).
+- `frontend/src/api.ts` — `getTrends` wrapper (**remaining work**).
 
-**Depends on:** Phase 0.
+**Depends on:** Phase 2.
 
-**Learn first**
-- `os.scandir` vs `pathlib.rglob` and why `DirEntry.stat()` avoids extra syscalls.
-- SQLite basics: foreign keys (and that they're **off by default** — `PRAGMA foreign_keys=ON`),
-  indexes, transactions, and `executemany` batching.
-- Python exception handling around filesystem calls (`PermissionError`, `FileNotFoundError`,
-  `OSError` for broken symlinks).
-- `pytest` fixtures (`tmp_path`) — you already have one to build on.
+**Remaining work**
+- Implement `getTrends()` in `api.ts` to connect the built chart to the working
+  backend command.
+- Backend trends tests; frontend build with the charting dependency.
 
-**Difficulty:** ★★★
-**Pitfalls**
-- **The 3× `stat()` bug** in the current scanner — cache one `stat` result.
-- Building the entire file list in memory before inserting — stream in batches or a huge home
-  dir will spike memory and delay first feedback.
-- Recursion via `rglob` follows into places you don't want (e.g. `Library`, `.Trash`) — decide
-  what to skip.
-- Forgetting `PRAGMA foreign_keys=ON` means your FK silently does nothing.
+**Notes**
+- The trend reads from retained `scans` summaries, never from pruned `files` rows,
+  so it spans full history.
+- With only one scan there is no trend; the view shows an explicit empty state.
 
 ---
 
-## Phase 2 — One insight, end-to-end (the demoable MVP) ⭐
+## Phase 4 — Auto-targeting and monitoring
 
-**Goal:** the first version you'd actually show someone. Click "Scan", watch progress, see a
-ranked "Large & Stale" list with evidence, click a file to reveal it in Finder.
-
-This is where the sidecar wiring happens — the riskiest integration in the project, so it gets
-its own phase.
+**Goal:** remove the manual path entry and begin watching the disk. The app scans
+the home directory automatically and tracks free space over time, flagging when
+storage runs low.
 
 **Features**
-- Analytics query: "Large & Stale" (large AND `mtime` older than threshold), ranked by
-  `size × age`. Return top ~200 with path, size, last-modified, human-readable evidence.
-- **Sidecar protocol implemented:** Tauri spawns Python; JSON lines over stdio; a `scan`
-  command that streams progress then a final result; a `top_large_stale` query command.
-- Rust glue in Tauri: spawn sidecar, forward `invoke` calls, relay progress events to the UI.
-- React UI: Scan button → progress bar → results table → "Reveal in Finder" (advise-only, no
-  delete).
+- Auto-scan the home directory (`~`) on launch; no path input. Handle the Full Disk
+  Access prompt and the denied case gracefully.
+- Record `disk_free_bytes` and `disk_total_bytes` on each scan.
+- In-app timer: while open, periodically check free space and flag the user when it
+  drops below a threshold.
 
 **Files/modules**
-- `backend/analyzer.py` (new — the query)
-- `backend/main.py` (finally non-empty — the stdio loop / command dispatcher)
-- `frontend/src-tauri/src/lib.rs` (spawn + `invoke` commands), `tauri.conf.json` (register
-  the sidecar binary + `externalBin`)
-- `frontend/src/App.tsx` (replace the starter template), a `ScanView` + `ResultsTable`
-  component, an `api.ts` wrapper around `invoke`.
+- `backend/scanner.py` / a small target-resolution helper (home directory).
+- `backend/database.py` — add `disk_*` columns to `scans`.
+- `backend/analyzer.py` — free-space history query (extends the trends query).
+- `frontend/src/` — remove the path input; add a disk-status / low-space indicator.
 
-**Depends on:** Phase 1 (needs a populated DB + scanner).
+**Depends on:** Phase 3 (reuses the scan-history and trend plumbing).
 
-**Learn first**
-- Tauri sidecar / `externalBin` config, and Tauri commands (`#[tauri::command]`) + `invoke`
-  from JS. (This is the single biggest new-concept load in the project.)
-- How to bundle Python as a runnable binary (PyInstaller) OR run the interpreter in dev — pick
-  the **dev path first**, defer bundling to Phase 5.
-- Reading/writing line-delimited JSON on stdin/stdout in Python (`sys.stdin`, `print(flush=True)`).
-- React state for async/streaming updates (progress events), and rendering a list.
-- macOS "reveal in Finder" (`open -R` or Tauri's shell/opener API).
-
-**Difficulty:** ★★★★★ (integration-heavy; budget the most time here)
-**Pitfalls**
-- **stdio buffering** — Python buffers stdout by default; without `flush=True` (or `-u`) the UI
-  hangs waiting for output. Classic first-timer trap.
-- Mixing protocol JSON and stray `print()` debug lines on the same stdout stream corrupts the
-  channel — send logs to **stderr**, data to stdout.
-- macOS TCC: scanning `~` triggers a Full Disk Access prompt; handle the denied case gracefully
-  instead of showing an empty/crashed scan.
-- Trying to bundle the app (codesigning, PyInstaller) *now* — that's a rabbit hole; stay in
-  `tauri dev` until Phase 5.
-- Scope creep: resist adding a second insight here. One insight, working, wins.
+**Considerations**
+- Full Disk Access is a first-class state, not an error path.
+- Disk-space capture should be part of the scan summary so a single history powers
+  both the size trend and the free-space trend.
 
 ---
 
-## Phase 3 — Trends over time
+## Phase 5 — Footprint and goals
 
-**Goal:** the app tells a story across scans: "your Downloads grew 8 GB since April."
+**Goal:** the app remembers across sessions — history, intended actions, and goals —
+so storage cleanup becomes an ongoing, trackable effort rather than a one-shot
+report.
 
 **Features**
-- Query total size (and optionally per-top-folder) per `scan` over time.
-- A trends view: a simple line/area chart of storage over scan history.
+- New tables: `actions` (the action log / footprint), `triage` (per-file
+  keep/delete/offload decisions), `goals`.
+- Three goal types as views over the footprint: free a target amount, stay above a
+  threshold, and a persistent triage list.
+- Goal progress surfaced in the UI and persisted across restarts.
 
 **Files/modules**
-- `backend/analyzer.py` (add trend query)
-- `frontend/src/` (a `TrendsView` + a chart component)
+- `backend/database.py` — `actions`, `triage`, `goals` tables (never prune
+  `actions`).
+- `backend/analyzer.py` — goal-progress queries.
+- `backend/main.py` — commands to create/read goals and record triage decisions.
+- `frontend/src/` — a goals view and per-file triage controls in the results table.
 
-**Depends on:** Phase 2 (needs the sidecar + multiple scans in history).
+**Depends on:** Phase 4 (goals reference disk-space history and, later, actions).
 
-**Learn first**
-- SQL `GROUP BY` / aggregates over the `scans`↔`files` join.
-- A React charting lib (Recharts is the gentle default). **Before writing chart code, read the
-  `dataviz` skill** — it'll keep the chart clean and accessible.
-- Date handling for the x-axis (epoch → display).
-
-**Difficulty:** ★★
-**Pitfalls**
-- With only one scan there's no trend — seed the UI with an empty/"come back after another
-  scan" state so it doesn't look broken.
-- Retention pruning (N=12) means old *file* rows are gone, but `scans` totals persist — make
-  sure the trend reads from retained aggregates, not pruned per-file rows. (Consider storing a
-  `total_bytes` summary column on `scans` at scan time so trends never depend on `files`.)
+**Considerations**
+- Goals are three views over one engine (action log + disk-space history + triage
+  tags); model the shared engine once.
+- The `actions` table is defined here but only populated once actions ship (Phase
+  6); reads should tolerate an empty log.
 
 ---
 
-## Phase 4 — Robustness & the macOS reality pass
+## Phase 6 — Safe-action framework and Move to Trash
 
-**Goal:** it survives a real, messy home directory and stops surprising the user.
+**Goal:** the app can act on files safely. Build the record → execute → verify →
+undo machinery once, and prove it with the lowest-risk action: Move to Trash.
 
 **Features**
-- Handle iCloud dataless placeholders (detect, skip, don't trigger downloads).
-- Reconcile hardlinks/APFS clones by inode before reporting any "reclaimable" number.
-- Configurable staleness/large thresholds in the UI.
-- Cancellable scans; clear permission-denied messaging.
+- Safe-action framework: record intent in `actions` before touching the filesystem;
+  execute in the sidecar; mark done with an undo token.
+- Move to Trash via the macOS Trash system API (reversible; never `rm`).
+- Undo path (restore from Trash) surfaced in the UI.
 
 **Files/modules**
-- `backend/scanner.py`, `backend/analyzer.py`, a small `settings` store, UI settings panel.
+- `backend/actions.py` (new) — the framework and the Trash operation.
+- `backend/main.py` — `move_to_trash` / `undo_action` commands.
+- `frontend/src/` — action buttons on recommendations; footprint/undo view.
 
-**Depends on:** Phase 2 (and benefits from 3).
+**Depends on:** Phase 5 (writes to the `actions` table).
 
-**Learn first**
-- macOS filesystem specifics: `atime` unreliability, `st_ino`/hardlinks, `SF_DATALESS` /
-  iCloud attributes, why "duplicate bytes ≠ reclaimable bytes" on APFS.
-
-**Difficulty:** ★★★★
-**Pitfalls**
-- Over-promising freed space (the clone/hardlink trap) — this is the credibility killer flagged
-  in DESIGN.md §2.
-- Threshold changes should re-query, not re-scan — keep those two actions distinct in the UI.
+**Considerations**
+- Every action is recorded before execution so an interrupted operation is
+  recoverable.
+- This framework is the foundation offload depends on; get record/verify/undo right
+  here before adding cross-volume moves.
 
 ---
 
-## Phase 5 — Packaging & distribution
+## Phase 7 — Offload to external storage
 
-**Goal:** a `.app` (or `.dmg`) someone can double-click — portfolio-shareable.
+**Goal:** move cold files to an external volume (e.g. an SSD) safely, reusing the
+Phase 6 framework. This is the highest-risk feature and the strongest user value.
 
 **Features**
-- Bundle Python (PyInstaller) as the Tauri `externalBin`.
-- `tauri build`; app icon; first-run experience.
+- Detect available external volumes as offload destinations.
+- Offload as copy → verify → delete-original: the original is removed only after the
+  destination copy is verified by size and checksum.
+- Reconcile hardlinks / APFS clones by inode before reporting reclaimable space.
+- Detect and skip iCloud dataless placeholders.
+- Survive destination disconnect mid-copy: the original is preserved and the action
+  remains `pending`.
 
 **Files/modules**
-- `frontend/src-tauri/tauri.conf.json`, build scripts, CI (optional GitHub Actions).
+- `backend/actions.py` — the offload operation and verification.
+- `backend/scanner.py` / `backend/analyzer.py` — inode reconciliation; iCloud
+  placeholder detection.
+- `frontend/src/` — destination selection; offload progress and verification state.
 
-**Depends on:** a working Phase 2 (bundling a broken app helps no one).
+**Depends on:** Phase 6 (framework) and Phase 4 (targeting).
 
-**Learn first**
-- PyInstaller one-file vs one-dir; how Tauri resolves sidecar binaries per-platform (the
-  `-<target-triple>` suffix convention).
-- macOS codesigning/notarization basics (or the "unsigned app" caveats for a portfolio demo).
-
-**Difficulty:** ★★★★
-**Pitfalls**
-- Path assumptions that work in `tauri dev` but break in the bundle (relative paths, cwd,
-  locating the DB) — use app-data dirs, not cwd.
-- Notarization is fiddly; for a portfolio it's fine to document "right-click → Open" rather than
-  pay for/fight the full Apple flow.
+**Considerations**
+- Never overstate reclaimable space: shared-inode bytes are not freed by offloading
+  a clone.
+- Never trigger an iCloud download in the course of an offload.
+- Verification before deletion is non-negotiable — a blind cross-volume move is not
+  acceptable.
 
 ---
 
-## Phase 6+ — Post-MVP (pick based on portfolio goals)
+## Phase 8 — Background agent
 
-- **v1.1 — Move to Trash** (reversible; system API, never `rm`). Difficulty ★★.
-- **v2 — Duplicate detection** (size → partial-hash → full-hash funnel). Difficulty ★★★★; the
-  first genuinely expensive/content-reading feature. Great algorithms talking point.
-- **Phase 4+ enterprise exploration** (server model, tiering, cost). This is where a real
-  network API (FastAPI) finally earns its place — and where the FastAPI you wanted to learn
-  belongs.
+**Goal:** deliver monitoring when the app is closed — the full "return the next day"
+experience.
+
+**Features**
+- A macOS LaunchAgent that runs the sidecar scan on a schedule while the app is
+  closed.
+- Low-space notifications that deep-link back into the app's recommendations.
+
+**Files/modules**
+- A LaunchAgent plist and install/uninstall flow.
+- Reuse of the Phase 4 scan and monitoring logic.
+
+**Depends on:** Phase 4 (monitoring) and Phase 6/7 (so notifications can point at
+actionable recommendations).
+
+**Considerations**
+- Unattended execution must be conservative: scan and notify only. It must never
+  take a destructive action without explicit user confirmation in the app.
+- Lifecycle matters: install, update, and cleanly uninstall the agent.
 
 ---
 
-## Suggested order & why
+## Suggested order and rationale
 
-`0 → 1 → 2` gets you a **demoable MVP** as fast as safely possible. `3` adds the "wow" (trends)
-cheaply on top of existing plumbing. `4` makes it trustworthy on real data. `5` makes it
-shareable. Everything past that is optional depth you add based on what you want the portfolio
-to say. Resist reordering to do the "fun" parts (dedupe, enterprise) before the MVP runs —
-that's how portfolio projects end up 60% done and undemoable.
+Phases 1–3 establish and visualize the data. Phase 4 makes the app proactive
+(auto-target + monitoring) and Phase 5 makes it persistent (footprint + goals) —
+together turning a report into a companion. Phase 6 introduces safe action on the
+lowest-risk operation, and Phase 7 reuses that same framework for the high-value,
+high-risk offload. Phase 8 extends monitoring beyond the app's runtime.
+
+The dependency spine is 4 → 5 → 6 → 7, with 8 building on Phase 4's monitoring.
+Offload is deliberately last among the action features: it is the riskiest
+operation and must inherit a safety framework that has already been proven on
+reversible actions.

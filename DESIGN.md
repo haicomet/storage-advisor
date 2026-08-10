@@ -1,164 +1,212 @@
-# Storage Advisor — Revised Design & MVP Plan
+# Storage Advisor — Design Document
 
-> Status: **decisions locked** (v0.2). Supersedes the architecture notes in `README.md`.
-> Reviewer decisions from 2026-07-11 folded in (see §9). Not yet implemented.
-
-> **Context:** personal portfolio project by a rising junior CS major who is learning
-> Python. Goals ranked: (1) a genuinely useful, demoable MVP; (2) code a reviewer respects
-> for its judgment (safety, scoping, data modeling); (3) a credible path toward an
-> enterprise story *after* MVP. These goals shape the decisions below.
+> **Status:** Locked (v0.3, 2026-08-10). Supersedes v0.2.
+> v0.3 redefines the product from a one-shot storage *advisor* into an ongoing
+> storage *companion* that persists state across sessions, monitors free space,
+> and safely acts on the user's behalf (Move to Trash, then offload to external
+> storage). The architecture, ingestion engine, and safety principle from v0.2
+> are retained and reused.
 
 ---
 
-## 1. Problem statement (one paragraph)
+## 1. Overview
 
-The OS tells users *where* their bytes are (biggest folders); it does not tell them *what
-is safe to let go of*. Storage Advisor uses filesystem **metadata + usage signals** to turn
-"500 GB used" into "here are specific files that are large, old, and untouched — and here's
-the evidence." The differentiator is **usage-aware, not just size-aware** insight.
+Storage Advisor is a storage-management companion for a single macOS user. The
+operating system reports *where* bytes are (largest folders) but not *what is safe
+to remove*, retains no history between sessions, and takes no action on the user's
+behalf.
 
-**MVP audience:** a single macOS user analyzing their own home directory. The enterprise /
-tiering ambition is a **deliberate post-MVP phase (§7, Phase 4+)**, not part of the MVP — it
-implies a different (server/distributed) architecture and must not influence MVP decisions.
-Keeping it sequenced (not deleted) is intentional: it's the portfolio "where this goes next"
-story, told without letting it distort the MVP build.
+Storage Advisor addresses all three:
 
-## 2. Core product principle
+- **Usage-aware recommendations.** It surfaces specific files that are large and
+  stale, with transparent evidence, rather than broad folder-size overviews.
+- **Persistent footprint.** It remembers scan history, the actions it has taken,
+  and the user's goals — so progress carries across launches.
+- **Monitoring.** It tracks free space over time and flags when the disk is
+  running low.
+- **Safe action.** It helps the user delete or offload flagged files to external
+  storage, with every action recorded, verified, and reversible.
 
-**Advise first; act only when the action is safe by construction.** Trust is the whole game —
-one wrongly-deleted precious file ends the product's credibility. So actions are sequenced by
-risk, not shipped all at once:
+The product is scoped to a single machine. There is no server component and no
+network service.
 
-- **MVP** — advise + open in Finder. Zero-risk; proves the insight is trustworthy before the
-  app is allowed to touch anything.
-- **v1.1** — "Move to Trash." A *reversible-by-design* action (macOS Trash via the system API,
-  **never `rm`**), so it's a real feature a reviewer respects *because* it's safe.
-- **v2** — permanent delete / move-to-external, gated behind dry-run + undo.
+## 2. Guiding principle: advise first, act only when safe
 
-Deliberately sequencing risk is itself the impressive part; a delete button on day one is not.
+Trust is the product's core constraint. A single wrongly-deleted or lost-in-transit
+file destroys user confidence permanently. Actions are therefore sequenced by risk,
+and every action is **recorded before execution, verified, and reversible**:
 
-## 3. Revised architecture
+1. **Advise + reveal in Finder** — zero risk. (Shipped.)
+2. **Move to Trash** — reversible by design via the macOS Trash system API, never
+   `rm`. Serves as the proof of the safe-action framework.
+3. **Offload to external storage** — copy → verify → delete original, gated on
+   successful verification and disconnect-safety. Reuses the same framework.
 
-**Decision (locked): Python as a Tauri sidecar over stdio. No FastAPI, no HTTP server.**
-Python is the right call here because the developer is learning Python and it reuses the
-existing `scanner.py` / `database.py`. But a long-lived localhost HTTP server is the
-highest-effort, highest-risk piece and adds an attack surface for zero product value on a
-single-machine app — so we keep Python and drop the web server.
+Destructive capabilities are never wired directly to the filesystem. The
+safe-action framework (§6) is built once, before any destructive feature depends
+on it.
 
-**What "sidecar over stdio" means:** Tauri spawns the Python process as a child and
-communicates over stdin/stdout (line-delimited JSON), instead of Python running a web server
-on a port. Same Python skills; none of the packaging/security baggage of a network API.
+## 3. Architecture
+
+Python runs as a Tauri sidecar communicating over stdio. There is no local HTTP
+server: a single-machine app gains nothing from a network port and avoids its
+attack surface and packaging cost.
 
 ```
-React UI ──invoke()──▶ Tauri (Rust shell) ──spawn + stdin/stdout──▶ Python (scan + analyze)
+React UI ──invoke()──▶ Tauri (Rust shell) ──spawn + stdin/stdout──▶ Python (scan/analyze/act)
    ▲                                                                     │
    └──────────────── JSON results / progress events ────────────────────┘
                                              Python ◀──read/write──▶ SQLite
 ```
 
-- **Frontend:** React + TypeScript in Tauri (keep).
-- **Backend:** Python child process, JSON-over-stdio protocol. Requests: `{cmd, args}`.
-  Responses: progress events + a final result, one JSON object per line.
-- **Storage:** SQLite (keep) — correct choice at this scale; do not over-engineer.
-- **FS access:** Python `os.scandir` (faster than `pathlib.rglob` — returns stat data
-  without a second syscall).
+- **Frontend** — React + TypeScript, hosted in Tauri.
+- **Backend** — a Python child process using a line-delimited JSON protocol.
+  Requests are `{id, cmd, args}`; responses are zero or more `progress` events
+  followed by exactly one terminal `result` or `error`.
+- **Storage** — SQLite.
+- **Filesystem access** — Python `os.scandir`, one `stat` per entry, results
+  streamed to the database in batches.
+- **Actions** — file moves and Trash operations run in the sidecar and are recorded
+  to SQLite before and after execution (§6). A future background agent (§8, Phase
+  8) can invoke the same scan unattended.
 
-> **On the README's async claim:** `async` gives concurrency, not parallelism. A recursive
-> disk walk is blocking IO work — running it in the sidecar process already keeps it off the
-> UI thread, which is what actually matters. Don't reach for `asyncio` here; a plain worker
-> loop that streams progress lines is simpler and correct.
+## 4. Data model — the footprint
 
-> **FastAPI is worth learning** — just on a project that needs a real network API (a hosted
-> service, a mobile client, the future enterprise server in Phase 4+). Not here.
-
-## 4. Data model (must exist before any "trends" feature)
-
-The current schema cannot express snapshots, rescans, or trends. Proposed:
+The footprint is the persistent record that makes the app stateful across sessions.
+It extends the existing `scans` and `files` tables with three new tables. The three
+goal types (§5) are views over this model rather than independent features.
 
 ```
-scans        (id, root_path, started_at, finished_at, status)
-files        (id, scan_id → scans.id, filepath, size_bytes,
-              last_modified, last_accessed, is_symlink, inode)
--- indexes on files(scan_id), files(size_bytes), files(last_accessed)
+scans      (id, root_path, started_at, finished_at, status, total_bytes,
+            disk_free_bytes, disk_total_bytes)          -- disk_* added in Phase 4
+files      (id, scan_id → scans.id, filepath, size_bytes,
+            last_modified, last_accessed, is_symlink, inode)
+
+actions    (id, kind, filepath, dest_path, size_bytes, inode,
+            status, created_at, completed_at, undo_token)
+            -- kind ∈ {trash, offload}; this log is both the footprint and undo record
+triage     (filepath, decision, decided_at)
+            -- decision ∈ {keep, delete, offload, undecided}
+goals      (id, kind, target_bytes, threshold_bytes, created_at, status)
+            -- kind ∈ {free_amount, stay_above, triage}
 ```
 
-- One row in `scans` per scan run → enables growth-over-time by comparing scans.
-- `files` rows belong to a scan → rescans are new snapshots, not blind appends.
+**Retention.** All `scans` rows are kept indefinitely; each is a small summary that
+powers full-history trends. Per-file rows in `files` are kept for the most recent
+N = 12 scans and pruned beyond that. The `actions` table is never pruned — it is the
+permanent record of every change made to the user's files. Disk-space history is
+stored on `scans` (`disk_free_bytes`), so a single scan history drives both the
+storage-size trend and the free-space trend.
 
-**Retention (locked):** keep **all `scans` rows forever** — one tiny row per run, so years of
-history costs almost nothing and powers the long-term trend chart. Keep **per-file rows only
-for the last N scans** (default `N = 12`); prune older `files` rows on each new scan. The
-`files` table is the only thing that bloats (hundreds of thousands of rows per scan), so
-bounding *it* keeps the DB small while the size-over-time trend is never lost.
+## 5. Targeting, monitoring, and goals
 
-## 5. Defining the signals (the actual product)
+### Scan target
+The default scan target is the user's home directory (`~`). The application does not
+require the user to enter a path. Home covers where personal clutter accumulates and
+requires a single Full Disk Access grant. Scanning the whole startup disk (`/`) is
+out of scope: it includes system files the app must never modify and multiplies
+permission friction. Users may later add additional roots — for example, mounting an
+external SSD to review what has already been offloaded.
 
-These need concrete, *user-visible* thresholds — not adjectives:
+Auto-scanning `~` triggers a macOS Full Disk Access prompt. A denied grant is
+handled with clear messaging, never an empty or crashed scan.
 
-- **Stale:** `last_modified` older than N months (default 12, configurable). On macOS,
-  **`atime` is unreliable** (often disabled/relatime) — treat "last accessed" as best-effort
-  and lead with `mtime`.
-- **Large:** top percentile by `size_bytes`, or > threshold (e.g. 100 MB).
-- **Flagship insight = "Large & Stale"** = large AND stale, ranked by `size × age`.
+### Monitoring
+Monitoring is delivered in two stages:
 
-Duplicate detection is **deferred to v2** (it's the expensive, content-reading feature).
+- **In-app timer (Phase 4).** While the application is open, it periodically reads
+  free space and, when free space falls below a threshold, flags the user and links
+  to current recommendations.
+- **Background agent (Phase 8).** A macOS LaunchAgent runs the sidecar scan while
+  the application is closed and posts a low-space notification. This delivers the
+  full "return the next day" experience and is deferred because unattended execution
+  introduces additional lifecycle and safety requirements.
 
-## 6. macOS realities to handle (not optional)
+### Goals
+Three goal types share one underlying engine:
 
-- **TCC / Full Disk Access:** scanning `~` triggers permission prompts; scanner must catch
-  `PermissionError` per-file and continue, not crash.
-- **iCloud dataless files:** stat-ing placeholders can trigger downloads — detect & skip.
-- **APFS clones / hardlinks:** two "duplicate" paths may share storage → "reclaimable GB"
-  can be overstated. Reconcile by inode before showing any "free X GB" number.
-- **Broken symlinks / permission errors mid-walk** must not abort the scan.
+- **Free a target amount** (`free_amount`) — sum of completed `actions.size_bytes`
+  since the goal was created, measured against `target_bytes`.
+- **Stay above a threshold** (`stay_above`) — the latest `scans.disk_free_bytes`
+  measured against `threshold_bytes`, enforced by the monitor.
+- **Triage list** (`triage`) — the `triage` table filtered to `undecided`, letting
+  the user work through flagged files over time.
 
-## 7. Phased MVP plan
+## 6. Safe-action framework
 
-**Phase 0 — Hygiene (small, do first)**
-- Replace `requirements.txt` (currently a machine-specific conda dump; won't install
-  anywhere) with a minimal pinned list.
-- Architecture confirmed: Python stdio sidecar (§3).
-- Define the JSON-over-stdio protocol (request/response/progress shapes).
+The framework is built once and reused by every destructive feature. Each action
+proceeds through four stages:
 
-**Phase 1 — Ingestion that actually supports the product**
-- Migrate schema to `scans` + `files` with indexes and the retention rule (§4).
-- Rewrite scanner: `os.scandir` with one stat per file (currently 3× via `rglob`), stream in
-  batches, per-file error handling, progress reporting, cancellation.
+1. **Record intent** — write an `actions` row with `status = 'pending'` *before*
+   touching the filesystem.
+2. **Execute** — perform the operation in the sidecar.
+3. **Verify** — for an offload, confirm the destination copy matches the source (by
+   size and checksum) *before* the original is removed. A cross-volume move is
+   always copy → verify → delete original, never a blind move.
+4. **Commit or undo** — mark the action `done` with an `undo_token` and expose a
+   reversal path (restore from Trash, or move back from external storage).
 
-**Phase 2 — One insight, end-to-end (this is the demoable MVP)**
-- "Large & Stale files" query + a single UI view: ranked list with evidence
-  ("4.2 GB · untouched since 2019"), open-in-Finder. Advise-only, no delete.
+The following macOS realities are safety-critical and are addressed as part of
+offload (Phase 7):
 
-**Phase 3 — Trends**
-- Growth-over-time using the `scans` history.
+- **APFS clones and hardlinks.** Two paths may share the same bytes (same inode).
+  Offloading a clone frees no space; sizes are reconciled by inode before any
+  reclaimable-space figure is shown.
+- **iCloud dataless files.** Copying or stat-ing a cloud placeholder triggers a
+  download. Placeholders are detected and skipped rather than offloaded.
+- **Volume disconnect mid-copy.** The destination volume can be removed during an
+  offload. Because intent is recorded and the copy is verified before deletion, an
+  interrupted offload leaves the original intact and the action `pending`.
 
-**v1.1 — First safe action**
-- "Move to Trash" via the macOS system API (reversible; never `rm`).
+## 7. Recommendation signals
 
-**v2 — Content & heavier actions**
-- Duplicate detection (size → partial-hash → full-hash funnel).
-- Permanent delete / move-to-external, gated behind dry-run + undo.
-- Configurable thresholds.
+- **Stale** — `last_modified` older than N months (default 12, configurable).
+  Recommendations lead with `mtime`; macOS `atime` is unreliable and treated as
+  best-effort only.
+- **Large** — top percentile by `size_bytes`, or above a fixed threshold (e.g.
+  100 MB).
+- **Large & Stale** — the flagship signal: large *and* stale, ranked by
+  `size × age`. This ranked list is the source of candidate files for Trash and
+  offload, not merely a report.
 
-**Phase 4+ — Enterprise exploration (post-MVP, the "where it goes next" story)**
-- Multi-machine / server model, storage-tiering recommendations, cost modeling. Different
-  architecture (this is where a real network API — e.g. FastAPI — earns its place). Kept as a
-  sequenced future, explicitly *not* allowed to influence MVP decisions.
+## 8. Phased plan
 
-## 8. Success criteria for MVP
+Detailed milestones are in `ROADMAP.md`.
 
-- Scan `~` without crashing on permission/iCloud/symlink edge cases.
-- Show a trustworthy ranked "Large & Stale" list with transparent evidence.
-- Rescan produces a new snapshot; DB is queryable for trends.
-- No open network port; no destructive action.
+- **Phases 1–2 (complete)** — ingestion; Large & Stale insight end-to-end
+  (advise + reveal in Finder).
+- **Phase 3 (in progress)** — storage trend over scan history.
+- **Phase 4** — auto-target home directory, record disk-space per scan, in-app
+  low-space flag.
+- **Phase 5** — footprint and goals: `actions`, `triage`, and `goals` tables; the
+  three goal views; persistence across sessions.
+- **Phase 6** — safe-action framework and Move to Trash.
+- **Phase 7** — offload to external storage, including inode and iCloud
+  reconciliation and disconnect-safety.
+- **Phase 8** — background agent: unattended scans and low-space notifications.
 
-## 9. Decisions (resolved 2026-07-11)
+## 9. Success criteria
 
-1. **Architecture → Python stdio sidecar** (§3). Python chosen for the learning goal + code
-   reuse; delivered as a Tauri sidecar over stdio, not a FastAPI HTTP server.
-2. **Enterprise → sequenced as Phase 4+, not deleted** (§1, §7). Out of MVP scope; kept as the
-   post-MVP portfolio story.
-3. **Retention → all `scans` forever, `files` for last N=12** (§4).
-4. **Actions → advise-only MVP, then "Move to Trash" (reversible) in v1.1, heavier actions in
-   v2** (§2). This resolves the earlier "unsure": we don't skip actions, we *sequence them by
-   risk* so the first action shipped is safe by construction.
+- Launches and auto-scans the home directory without crashing on permission,
+  iCloud, or symlink edge cases.
+- Persists its footprint — scan history, actions, and goals — across restarts.
+- Flags low disk space and links it to specific Large & Stale recommendations.
+- Records, verifies, and can reverse every destructive action, with no data lost on
+  an interrupted offload and no overstated reclaimable-space figure.
+- Operates entirely on the local machine with no open network port.
+
+## 10. Decision log (2026-08-10, v0.3)
+
+1. The product is an ongoing storage companion — persistent footprint, monitoring,
+   and safe actions — rather than a one-shot advisor. The existing engine and
+   architecture are reused.
+2. Monitoring ships as an in-app timer first (Phase 4); a background LaunchAgent is
+   deferred to Phase 8.
+3. The safe-action framework is built before any destructive feature. Move to Trash
+   (Phase 6) is its first, reversible proof; offload (Phase 7) reuses it.
+4. The default scan target is the home directory; whole-disk scanning is out of
+   scope for the MVP.
+5. All three goal types (free-amount, stay-above, triage) are implemented as views
+   over a single footprint engine (§4).
+6. The v0.2 "macOS reality pass" is folded into offload (Phase 7) as a set of safety
+   prerequisites rather than a standalone phase.
