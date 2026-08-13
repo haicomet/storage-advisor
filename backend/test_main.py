@@ -51,11 +51,17 @@ def test_handler_exception_becomes_internal_error(sent, monkeypatch):
 
 # --- handle_scan -------------------------------------------------------------
 
-def test_scan_missing_path_is_invalid_args(sent):
-    """A scan with no path returns INVALID_ARGS before touching the disk."""
+def test_scan_missing_path_auto_targets_home(sent, monkeypatch):
+    """Phase 4: a scan with no path auto-targets home, it is NOT an error.
+
+    We stub the scanner so the test doesn't actually walk the real home dir —
+    we only care that handle_scan resolves a target and completes rather than
+    returning the old INVALID_ARGS error.
+    """
+    monkeypatch.setattr(main.scanner, "scan_directory", lambda path, progress_callback=None: iter([]))
     main.handle_scan("r1", {})
-    assert sent[-1]["type"] == "error"
-    assert sent[-1]["error"]["code"] == "INVALID_ARGS"
+    assert sent[-1]["type"] == "result"
+    # TODO (when disk capture lands): also assert disk_free_bytes is in the result.
 
 
 def test_scan_streams_progress_then_result(sent, tmp_path):
@@ -111,4 +117,15 @@ def test_trends_returns_points_list(sent, tmp_path):
     #   test_scan_streams_progress_then_result), then main.handle_trends("r2", {}).
     #   Assert sent[-1]["type"] == "result" and "points" in sent[-1]["data"], and
     #   that the point's total_bytes matches the scanned bytes.
+    raise NotImplementedError
+
+
+# --- handle_disk_status (Phase 4) --------------------------------------------
+
+def test_disk_status_returns_status(sent):
+    """disk_status returns a live free/total/low-flag reading without a scan."""
+    # TODO: call main.handle_disk_status("d1", {}); assert sent[-1]["type"] ==
+    #   "result" and the data has free_bytes / total_bytes / is_low. This is a
+    #   live read of the real volume, so assert on presence/types, not exact
+    #   values (or monkeypatch main.disk.get_disk_usage for determinism).
     raise NotImplementedError

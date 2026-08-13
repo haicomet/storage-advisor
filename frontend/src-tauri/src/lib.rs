@@ -132,6 +132,13 @@ async fn get_trends(state: State<'_, SidecarState>) -> Result<Value, String> {
 }
 
 #[tauri::command]
+async fn get_disk_status(state: State<'_, SidecarState>) -> Result<Value, String> {
+    // Forward to the sidecar's `disk_status` command — a cheap live read of how
+    // full the volume is (free/total/percent + low-space flag). No scan needed.
+    send_request("disk_status", json!({}), state)
+}
+
+#[tauri::command]
 fn reveal_in_finder(filepath: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
@@ -168,6 +175,7 @@ pub fn run() {
             start_scan,
             top_large_stale,
             get_trends,
+            get_disk_status,
             reveal_in_finder
         ])
         .run(tauri::generate_context!())

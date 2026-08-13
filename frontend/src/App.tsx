@@ -11,15 +11,23 @@ import { useState } from "react";
 import ScanView from "./components/ScanView";
 import ResultsTable from "./components/ResultsTable";
 import TrendsView from "./components/TrendsView";
-import { topLargeStale, getTrends } from "./api";
-import type { FileRow, ScanResult, TrendPoint } from "./types";
+import DiskStatusBar from "./components/DiskStatusBar";
+import { topLargeStale, getTrends, getDiskStatus } from "./api";
+import type { FileRow, ScanResult, TrendPoint, DiskStatus } from "./types";
 import "./App.css";
 
 function App() {
   const [_results, _setResults] = useState<FileRow[]>([]);
   const [trends, setTrends] = useState<TrendPoint[]>([]);
+  const [diskStatus, setDiskStatus] = useState<DiskStatus | null>(null);
   const [hasScanned, setHasScanned] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // TODO (Phase 4 auto-scan): on mount, fetch disk status immediately (cheap,
+  // no scan) so the DiskStatusBar shows right away, then kick off the home-dir
+  // scan. Use a useEffect with an empty dep array; guard against React 18
+  // StrictMode double-invoke so it doesn't scan twice in dev.
+  //   useEffect(() => { getDiskStatus().then(setDiskStatus); /* + trigger scan */ }, []);
 
   async function handleScanComplete(_result: ScanResult) {
     setHasScanned(true);
@@ -31,6 +39,10 @@ function App() {
 
       const points = await getTrends();
       setTrends(points);
+
+      // TODO: refresh disk status after a scan too (free space just changed if
+      // the user acted, and the scan captured a fresh snapshot).
+      //   setDiskStatus(await getDiskStatus());
     } catch (err: any) {
       setError(err.toString());
     }
@@ -39,6 +51,8 @@ function App() {
   return (
     <main className="container">
       <h1>Storage Advisor</h1>
+
+      <DiskStatusBar status={diskStatus} />
 
       {error && <div className="error-banner">Error fetching results: {error}</div>}
 

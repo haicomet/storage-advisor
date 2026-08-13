@@ -23,6 +23,7 @@ import time
 from . import database
 from . import scanner
 from . import analyzer
+from . import disk
 
 # NOTE: keep imports package-relative so `python -m backend.main` works from the
 # repo root (same fix tracked for scan_cli). e.g. from .analyzer import ...
@@ -44,14 +45,11 @@ def log(message: str) -> None:
 def handle_scan(req_id: str, args: dict) -> None:
     """Handle a `scan` request: walk the path, stream progress, insert rows, finish."""
 
-    target_path = args.get("path")
-    if not target_path:
-        send({
-            "id": req_id,
-            "type": "error",
-            "error": {"code": "INVALID_ARGS", "message": "Missing 'path' argument"}
-        })
-        return
+    # Phase 4: no path means "scan the default target" (home dir), not an error.
+    # TODO: replace the raw args.get with disk.resolve_scan_target(args.get("path"))
+    #   so an absent/empty path resolves to the home directory. The old
+    #   INVALID_ARGS branch is gone on purpose — the app auto-targets now.
+    target_path = disk.resolve_scan_target(args.get("path"))
 
     log(f"[scan] Starting scan of {target_path}")
     database.init_db()
@@ -79,8 +77,15 @@ def handle_scan(req_id: str, args: dict) -> None:
                 files_seen += len(batch)
 
         duration_ms = int((time.time() - start_time) * 1000)
+
+        # Phase 4: snapshot how full the volume is, so this scan feeds the
+        # free-space trend and the low-space flag.
+        # TODO: free_bytes, total = disk.get_disk_usage(target_path)
+        #   then pass disk_free_bytes/disk_total_bytes into finish_scan below and
+        #   include them in the result data (so the UI can flag low space
+        #   immediately without a separate query).
         database.finish_scan(scan_id, int(time.time()), total_bytes, status="complete")
-        
+
         # On success, send one terminal result message
         send({
             "id": req_id,
@@ -90,6 +95,7 @@ def handle_scan(req_id: str, args: dict) -> None:
                 "files_seen": files_seen,
                 "duration_ms": duration_ms,
                 "total_bytes": total_bytes
+                # TODO: add disk_free_bytes / disk_total_bytes here
             }
         })
         log(f"[scan] Complete. Took {duration_ms}ms")
@@ -172,11 +178,30 @@ def handle_trends(req_id: str, args: dict) -> None:
 
 
 
+def handle_disk_status(req_id: str, args: dict) -> None:
+    """Handle a `disk_status` request: report current free/total space + low flag.
+
+    Emits one {type:"result", data: <disk status>} with fields like
+    {free_bytes, total_bytes, used_bytes, percent_free, is_low}.
+
+    TODO:
+      - Resolve the target volume via disk.resolve_scan_target(args.get("path")).
+      - free, total = disk.get_disk_usage(target); low = disk.is_low_space(free, total).
+      - Build the status dict and send it. Mirror handle_trends' try/except with a
+        QUERY_ERROR on failure.
+      - This is a cheap live read (doesn't need a scan) so the UI can show a
+        disk-status bar on launch before the first scan finishes.
+    """
+    # TODO: implement
+    raise NotImplementedError
+
+
 # Maps a protocol `cmd` string to its handler.
 COMMANDS = {
     "scan": handle_scan,
     "top_large_stale": handle_top_large_stale,
     "trends": handle_trends,
+    "disk_status": handle_disk_status,
 }
 
 
