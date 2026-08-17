@@ -1,10 +1,10 @@
 /**
- * ScanView.tsx — the "run a scan" panel: pick/enter a path, start, watch progress.
+ * ScanView.tsx — scan lifecycle UI (Phase 4: auto-targeted).
  *
- * Owns the scan lifecycle UI: an idle state (path input + Scan button), a
- * running state (progress bar / files-seen counter), and hands the finished
- * result up to the parent so ResultsTable can query. Business logic lives in
- * api.ts; this file is presentation + local state only.
+ * The path input is gone. The app scans the home directory automatically — on
+ * launch (triggered by App) and via a manual "Rescan" button. This component
+ * owns only the scan lifecycle state (running / progress / error) and bubbles
+ * the finished result up via onScanComplete. Business logic lives in api.ts.
  */
 
 import { useState } from "react";
@@ -12,12 +12,14 @@ import { startScan } from "../api";
 import type { ScanProgress, ScanResult } from "../types";
 
 interface ScanViewProps {
-  // Called once a scan finishes so the parent can trigger the results query.
   onScanComplete: (result: ScanResult) => void;
+  // TODO (App wiring): App will call the scan on mount too. Options:
+  //   - expose an imperative handle, OR
+  //   - lift handleScan into App and pass `onRescan` down. Pick one; keep a
+  //     single code path so launch-scan and manual-rescan behave identically.
 }
 
-export default function ScanView({ onScanComplete: onScanComplete }: ScanViewProps) {
-  const [path, setPath] = useState("");
+export default function ScanView({ onScanComplete }: ScanViewProps) {
   const [progress, setProgress] = useState<ScanProgress | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -28,9 +30,12 @@ export default function ScanView({ onScanComplete: onScanComplete }: ScanViewPro
     setProgress({ files_seen: 0, current_dir: "Starting..." });
 
     try {
-      const result = await startScan(path, (p) => setProgress(p));
+      // Phase 4: no path — undefined means "auto-target home" (see api.startScan).
+      const result = await startScan(undefined, (p) => setProgress(p));
       onScanComplete(result);
     } catch (err: any) {
+      // The denied-permission case (Full Disk Access) is a first-class state,
+      // not a silent failure — keep surfacing it clearly.
       setError(err.toString());
     } finally {
       setIsScanning(false);
@@ -41,21 +46,17 @@ export default function ScanView({ onScanComplete: onScanComplete }: ScanViewPro
   return (
     <section>
       <div className="scan-controls">
-        <input
-          type="text"
-          value={path}
-          onChange={(e) => setPath(e.target.value)}
-          disabled={isScanning}
-          placeholder="Enter path to scan (e.g. ~/Downloads)"
-        />
-        <button onClick={handleScan} disabled={isScanning || !path.trim()}>
-          {isScanning ? "Scanning..." : "Scan"}
+        {/* TODO: show the target (e.g. "Scanning your home folder") instead of a
+            path input, plus a Rescan button. */}
+        <button onClick={handleScan} disabled={isScanning}>
+          {isScanning ? "Scanning..." : "Rescan"}
         </button>
       </div>
 
-      {/* The denied-permission case is a first-class state */}
       {error && (
         <div className="scan-error">
+          {/* TODO: if this is a Full Disk Access denial, give guidance on granting
+              it in System Settings — don't just dump the raw error. */}
           <strong>Scan Failed:</strong> {error}
         </div>
       )}

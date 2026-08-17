@@ -41,3 +41,13 @@ export interface TrendPoint {
   total_bytes: number; // chart y-axis
   total_human: string; // e.g. "4.2 GB" — tooltip/label
 }
+
+// Current volume fullness. Mirrors main.handle_disk_status() output.
+// Drives the disk-status bar and the low-space flag (DESIGN.md §5).
+export interface DiskStatus {
+  free_bytes: number;
+  total_bytes: number;
+  used_bytes: number;
+  percent_free: number; // 0–100
+  is_low: boolean; // true when at/below the low-space threshold
+}

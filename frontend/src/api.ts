@@ -9,13 +9,21 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { FileRow, ScanProgress, ScanResult, TrendPoint } from "./types";
+import type { FileRow, ScanProgress, ScanResult, TrendPoint, DiskStatus } from "./types";
 
 /**
- * Start a scan of `path`, receiving streamed progress via `onProgress`.
+ * Start a scan, receiving streamed progress via `onProgress`.
+ *
+ * Phase 4: `path` is now OPTIONAL — when omitted, the backend auto-targets the
+ * home directory. Pass a path only for user-added roots (e.g. an external SSD).
+ *
+ * TODO:
+ *   - Make the invoke send `{ path }` where path may be undefined; the Rust
+ *     command takes it and the sidecar resolves an absent path to home.
+ *     (Confirm the Rust `start_scan` signature accepts an optional path.)
  */
 export async function startScan(
-  path: string,
+  path: string | undefined,
   onProgress: (p: ScanProgress) => void,
 ): Promise<ScanResult> {
   // subscribe to the event channel before scan
@@ -67,6 +75,19 @@ export async function revealInFinder(filepath: string): Promise<void> {
  *     Rust command grows one.
  */
 export async function getTrends(): Promise<TrendPoint[]> {
+  // TODO: implement
+  throw new Error("not implemented");
+}
+
+/**
+ * Fetch the current disk status (free/total space + low-space flag).
+ *
+ * TODO:
+ *   - invoke<DiskStatus>("get_disk_status") and return it directly (the sidecar
+ *     sends the status object as `data`, not wrapped in an envelope).
+ *   - Cheap live read — safe to call on app launch before any scan.
+ */
+export async function getDiskStatus(): Promise<DiskStatus> {
   // TODO: implement
   throw new Error("not implemented");
 }

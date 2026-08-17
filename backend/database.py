@@ -38,10 +38,17 @@ def init_db() -> None:
                 started_at INTEGER NOT NULL,
                 finished_at INTEGER,
                 status TEXT NOT NULL,
-                total_bytes INTEGER
+                total_bytes INTEGER,
+                disk_free_bytes INTEGER,
+                disk_total_bytes INTEGER
             )
         """
         )
+        # NOTE (Phase 4): disk_free_bytes / disk_total_bytes are new. On a DB
+        # created before Phase 4, CREATE TABLE IF NOT EXISTS won't add them.
+        # TODO: run a tiny migration for existing DBs, e.g. check pragma
+        #   table_info(scans) and ALTER TABLE scans ADD COLUMN ... if absent.
+        #   (New installs get the columns from the CREATE above.)
 
         conn.execute("""
             CREATE TABLE IF NOT EXISTS files (
@@ -73,14 +80,26 @@ def create_scan(root_path: str, started_at: int) -> int:
 
 
 def finish_scan(scan_id: int, finished_at: int, total_bytes: int,
-                status: str = "complete") -> None:
-    # Mark a scan finished and record its summary total.
+                status: str = "complete",
+                disk_free_bytes: int | None = None,
+                disk_total_bytes: int | None = None) -> None:
+    """Mark a scan finished and record its summary total + disk-space snapshot.
 
+    disk_free_bytes / disk_total_bytes capture how full the VOLUME was at scan
+    time (from disk.get_disk_usage) — this is what powers the free-space trend
+    and the low-space flag. They're optional so existing callers/tests keep
+    working; when omitted the columns stay NULL.
+
+    TODO:
+      - Extend the UPDATE to also set disk_free_bytes and disk_total_bytes.
+      - Keep it a single UPDATE (don't split into two writes).
+    """
     with get_db_connection() as conn:
         conn.execute(
             "UPDATE scans SET finished_at = ?, total_bytes = ?, status = ? WHERE id = ?",
             (finished_at, total_bytes, status, scan_id)
         )
+        # TODO: include disk_free_bytes / disk_total_bytes in the UPDATE above.
 
 
 def insert_file_batch(scan_id: int, rows: list[tuple]) -> None:
