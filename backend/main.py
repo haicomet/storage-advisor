@@ -46,9 +46,6 @@ def handle_scan(req_id: str, args: dict) -> None:
     """Handle a `scan` request: walk the path, stream progress, insert rows, finish."""
 
     # Phase 4: no path means "scan the default target" (home dir), not an error.
-    # TODO: replace the raw args.get with disk.resolve_scan_target(args.get("path"))
-    #   so an absent/empty path resolves to the home directory. The old
-    #   INVALID_ARGS branch is gone on purpose — the app auto-targets now.
     target_path = disk.resolve_scan_target(args.get("path"))
 
     log(f"[scan] Starting scan of {target_path}")
@@ -78,13 +75,17 @@ def handle_scan(req_id: str, args: dict) -> None:
 
         duration_ms = int((time.time() - start_time) * 1000)
 
-        # Phase 4: snapshot how full the volume is, so this scan feeds the
-        # free-space trend and the low-space flag.
-        # TODO: free_bytes, total = disk.get_disk_usage(target_path)
-        #   then pass disk_free_bytes/disk_total_bytes into finish_scan below and
-        #   include them in the result data (so the UI can flag low space
-        #   immediately without a separate query).
-        database.finish_scan(scan_id, int(time.time()), total_bytes, status="complete")
+        # snapshot of volume capacity
+        free_bytes, disk_total = disk.get_disk_usage(target_path)
+
+        database.finish_scan(
+            scan_id,
+            int(time.time()),
+            total_bytes,
+            status="complete",
+            disk_free_bytes=free_bytes,
+            disk_total_bytes=disk_total
+        )
 
         # On success, send one terminal result message
         send({
@@ -179,21 +180,37 @@ def handle_trends(req_id: str, args: dict) -> None:
 
 
 def handle_disk_status(req_id: str, args: dict) -> None:
-    """Handle a `disk_status` request: report current free/total space + low flag.
+    """Handle a `disk_status` request: report current free/total space + low flag."""
 
-    Emits one {type:"result", data: <disk status>} with fields like
-    {free_bytes, total_bytes, used_bytes, percent_free, is_low}.
+    log("[disk_status] Fetching current volume status...")
+    
+    try:
+        target_path = disk.resolve_scan_target(args.get("path"))
+        free_bytes, total_bytes = disk.get_disk_usage(target_path)
+        
+        is_low = disk.is_low_space(free_bytes, total_bytes)
+        used_bytes = total_bytes - free_bytes
+        percent_free = (free_bytes / total_bytes * 100) if total_bytes > 0 else 0.0
 
-    TODO:
-      - Resolve the target volume via disk.resolve_scan_target(args.get("path")).
-      - free, total = disk.get_disk_usage(target); low = disk.is_low_space(free, total).
-      - Build the status dict and send it. Mirror handle_trends' try/except with a
-        QUERY_ERROR on failure.
-      - This is a cheap live read (doesn't need a scan) so the UI can show a
-        disk-status bar on launch before the first scan finishes.
-    """
-    # TODO: implement
-    raise NotImplementedError
+        send({
+            "id": req_id,
+            "type": "result",
+            "data": {
+                "free_bytes": free_bytes,
+                "total_bytes": total_bytes,
+                "used_bytes": used_bytes,
+                "percent_free": percent_free,
+                "is_low": is_low
+            }
+        })
+        
+    except Exception as e:
+        log(f"[disk_status] Error: {e}")
+        send({
+            "id": req_id,
+            "type": "error",
+            "error": {"code": "QUERY_ERROR", "message": str(e)}
+        })
 
 
 # Maps a protocol `cmd` string to its handler.
