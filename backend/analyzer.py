@@ -133,20 +133,46 @@ def disk_history(conn: sqlite3.Connection, *, limit: int | None = None) -> list[
 
     Powers the free-space trend line (distinct from scan_trends, which tracks the
     scanned bytes total). Each dict: {scan_id, started_at, disk_free_bytes,
-    disk_total_bytes, free_human}.
+    disk_total_bytes, free_human}."""
 
-    TODO:
-      - SELECT id, started_at, disk_free_bytes, disk_total_bytes FROM scans
-        WHERE status = 'complete' AND disk_free_bytes IS NOT NULL
-        ORDER BY started_at ASC   (mirror scan_trends, incl. the optional limit
-        subquery pattern).
-      - Skip rows where disk_free_bytes IS NULL — scans from before Phase 4 (or
-        failed ones) never captured it; including them would draw a false dip.
-      - Map to the dict above, reusing _human_size for free_human.
-      - Return [] when empty.
-    """
-    # TODO: implement
-    raise NotImplementedError
+    if limit is not None:
+        # subquery fetches the N most recent scans; outer query re-sorts them chronologically
+        query = """
+            SELECT id, started_at, disk_free_bytes, disk_total_bytes
+            FROM (
+                SELECT id, started_at, disk_free_bytes, disk_total_bytes
+                FROM scans
+                WHERE status = 'complete' 
+                  AND disk_free_bytes IS NOT NULL
+                ORDER BY started_at DESC
+                LIMIT ?
+            )
+            ORDER BY started_at ASC
+        """
+        cursor = conn.execute(query, (limit,))
+    else:
+        # no limit: just fetch everything chronologically.
+        query = """
+            SELECT id, started_at, disk_free_bytes, disk_total_bytes
+            FROM scans
+            WHERE status = 'complete' 
+              AND disk_free_bytes IS NOT NULL
+            ORDER BY started_at ASC
+        """
+        cursor = conn.execute(query)
+
+    results = []
+    for row in cursor:
+        free_bytes = row["disk_free_bytes"]
+        results.append({
+            "scan_id": row["id"],
+            "started_at": row["started_at"],
+            "disk_free_bytes": free_bytes,
+            "disk_total_bytes": row["disk_total_bytes"],
+            "free_human": _human_size(free_bytes),
+        })
+
+    return results
 
 
 def _human_size(size_bytes: int) -> str:

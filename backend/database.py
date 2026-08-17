@@ -44,11 +44,14 @@ def init_db() -> None:
             )
         """
         )
-        # NOTE (Phase 4): disk_free_bytes / disk_total_bytes are new. On a DB
-        # created before Phase 4, CREATE TABLE IF NOT EXISTS won't add them.
-        # TODO: run a tiny migration for existing DBs, e.g. check pragma
-        #   table_info(scans) and ALTER TABLE scans ADD COLUMN ... if absent.
-        #   (New installs get the columns from the CREATE above.)
+
+        cursor = conn.execute("PRAGMA table_info(scans)")
+        columns = [row["name"] for row in cursor.fetchall()]
+        
+        if "disk_free_bytes" not in columns:
+            conn.execute("ALTER TABLE scans ADD COLUMN disk_free_bytes INTEGER")
+        if "disk_total_bytes" not in columns:
+            conn.execute("ALTER TABLE scans ADD COLUMN disk_total_bytes INTEGER")
 
         conn.execute("""
             CREATE TABLE IF NOT EXISTS files (
@@ -90,16 +93,19 @@ def finish_scan(scan_id: int, finished_at: int, total_bytes: int,
     and the low-space flag. They're optional so existing callers/tests keep
     working; when omitted the columns stay NULL.
 
-    TODO:
-      - Extend the UPDATE to also set disk_free_bytes and disk_total_bytes.
-      - Keep it a single UPDATE (don't split into two writes).
     """
     with get_db_connection() as conn:
         conn.execute(
-            "UPDATE scans SET finished_at = ?, total_bytes = ?, status = ? WHERE id = ?",
-            (finished_at, total_bytes, status, scan_id)
+            """UPDATE scans
+            SET finished_at = ?,
+                total_bytes = ?,
+                status = ?,
+                disk_free_bytes = ?,
+                disk_total_bytes = ?
+            WHERE id = ?
+            """,
+            (finished_at, total_bytes, status, disk_free_bytes, disk_total_bytes, scan_id)
         )
-        # TODO: include disk_free_bytes / disk_total_bytes in the UPDATE above.
 
 
 def insert_file_batch(scan_id: int, rows: list[tuple]) -> None:
