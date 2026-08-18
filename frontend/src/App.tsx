@@ -7,7 +7,7 @@
  * here.
  */
 
-import { useState } from "react";
+import { useRef, useEffect, useState } from "react";
 import ScanView from "./components/ScanView";
 import ResultsTable from "./components/ResultsTable";
 import TrendsView from "./components/TrendsView";
@@ -23,11 +23,35 @@ function App() {
   const [hasScanned, setHasScanned] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // TODO (Phase 4 auto-scan): on mount, fetch disk status immediately (cheap,
-  // no scan) so the DiskStatusBar shows right away, then kick off the home-dir
-  // scan. Use a useEffect with an empty dep array; guard against React 18
-  // StrictMode double-invoke so it doesn't scan twice in dev.
-  //   useEffect(() => { getDiskStatus().then(setDiskStatus); /* + trigger scan */ }, []);
+  const hasInitialized = useRef(false);
+
+  // auto-scan: on mount, fetch disk status immediately
+  useEffect(() => {
+    if (hasInitialized.current) return;
+    hasInitialized.current = true;
+
+    refreshDiskStatus();
+
+    // Load historical trends on mount if they exist
+    getTrends().then(setTrends).catch(console.error);
+
+    // Keep the monitor alive by polling every 10 seconds
+    const intervalId = setInterval(refreshDiskStatus, 10000);
+    return () => clearInterval(intervalId);
+  }, []);
+
+  async function refreshDiskStatus() {
+    try {
+      const status = await getDiskStatus();
+      setDiskStatus(status);
+      
+      // Clear any previous disk errors on a successful fetch
+      setError((prev) => (prev?.includes("Disk Monitor Error") ? null : prev));
+    } catch (err: any) {
+      console.error("Failed to fetch disk status", err);
+      setError(`Disk Monitor Error: ${err.toString()}`);
+    }
+  }
 
   async function handleScanComplete(_result: ScanResult) {
     setHasScanned(true);
@@ -40,9 +64,7 @@ function App() {
       const points = await getTrends();
       setTrends(points);
 
-      // TODO: refresh disk status after a scan too (free space just changed if
-      // the user acted, and the scan captured a fresh snapshot).
-      //   setDiskStatus(await getDiskStatus());
+      await refreshDiskStatus();
     } catch (err: any) {
       setError(err.toString());
     }
