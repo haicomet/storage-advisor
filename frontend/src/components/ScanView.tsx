@@ -10,19 +10,28 @@
 import { useState } from "react";
 import { startScan } from "../api";
 import type { ScanProgress, ScanResult } from "../types";
+import { useEffect, useRef } from "react";
 
 interface ScanViewProps {
   onScanComplete: (result: ScanResult) => void;
-  // TODO (App wiring): App will call the scan on mount too. Options:
-  //   - expose an imperative handle, OR
-  //   - lift handleScan into App and pass `onRescan` down. Pick one; keep a
-  //     single code path so launch-scan and manual-rescan behave identically.
 }
 
 export default function ScanView({ onScanComplete }: ScanViewProps) {
   const [progress, setProgress] = useState<ScanProgress | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Guard against React 18 StrictMode double-invoke
+  const hasInitialized = useRef(false);
+
+  // Trigger the initial home-dir scan automatically on mount
+  useEffect(() => {
+    if (hasInitialized.current) return;
+    hasInitialized.current = true;
+    
+    handleScan();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function handleScan() {
     setIsScanning(true);
@@ -43,11 +52,17 @@ export default function ScanView({ onScanComplete }: ScanViewProps) {
     }
   }
 
+  // Detect macOS permission errors
+  const isPermissionError =
+    error?.toLowerCase().includes("operation not permitted") || 
+    error?.toLowerCase().includes("permission denied");
+
   return (
     <section>
       <div className="scan-controls">
-        {/* TODO: show the target (e.g. "Scanning your home folder") instead of a
-            path input, plus a Rescan button. */}
+        <div style={{ flexGrow: 1, color: '#444' }}>
+          <strong>Target:</strong> Home Folder (~)
+        </div>
         <button onClick={handleScan} disabled={isScanning}>
           {isScanning ? "Scanning..." : "Rescan"}
         </button>
@@ -55,9 +70,14 @@ export default function ScanView({ onScanComplete }: ScanViewProps) {
 
       {error && (
         <div className="scan-error">
-          {/* TODO: if this is a Full Disk Access denial, give guidance on granting
-              it in System Settings — don't just dump the raw error. */}
           <strong>Scan Failed:</strong> {error}
+
+          {isPermissionError && (
+            <div style={{ marginTop: '0.5rem', fontSize: '0.95em' }}>
+              <p>macOS is blocking access to some of your folders.</p>
+              <p>To fix this, open <strong>System Settings &gt; Privacy &amp; Security &gt; Full Disk Access</strong>, and toggle on Storage Advisor.</p>
+            </div>
+          )}
         </div>
       )}
 

@@ -67,27 +67,16 @@ export async function revealInFinder(filepath: string): Promise<void> {
 
 /**
  * Fetch total-storage-size-per-scan over history for the trends chart.
- *
- * TODO:
- *   - invoke<{ points: TrendPoint[] }>("get_trends") and return response.points
- *     (mirror topLargeStale, which unwraps the { items } envelope).
- *   - No args needed for the MVP; add an optional `limit?: number` later if the
- *     Rust command grows one.
  */
 export async function getTrends(): Promise<TrendPoint[]> {
-  // TODO: implement
-  throw new Error("not implemented");
+
+  const response = await invoke<{ points: TrendPoint[] }>("get_trends");
+  return response.points;
 }
 
 /**
  * Fetch the current disk status (free/total space + low-space flag).
- *
- * TODO:
- *   - invoke<DiskStatus>("get_disk_status") and return it directly (the sidecar
- *     sends the status object as `data`, not wrapped in an envelope).
- *   - Cheap live read — safe to call on app launch before any scan.
  */
 export async function getDiskStatus(): Promise<DiskStatus> {
-  // TODO: implement
-  throw new Error("not implemented");
+  return await invoke<DiskStatus>("get_disk_status");
 }
