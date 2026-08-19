@@ -1,11 +1,14 @@
 # Storage Advisor — Design Document
 
-> **Status:** Locked (v0.3, 2026-08-10). Supersedes v0.2.
-> v0.3 redefines the product from a one-shot storage *advisor* into an ongoing
+> **Status:** Locked (v0.4, 2026-08-19). Supersedes v0.3.
+> v0.3 redefined the product from a one-shot storage *advisor* into an ongoing
 > storage *companion* that persists state across sessions, monitors free space,
 > and safely acts on the user's behalf (Move to Trash, then offload to external
-> storage). The architecture, ingestion engine, and safety principle from v0.2
-> are retained and reused.
+> storage). v0.4 broadens the recommendation layer: "Large & Stale" alone finds
+> only a safe sliver of reclaimable space, so v0.4 adds size-led offload
+> candidates and **folder-level** rollups, and makes triage operate on folders
+> (cohorts) rather than individual files. The architecture, ingestion engine, and
+> safety principle are retained and reused.
 
 ---
 
@@ -82,14 +85,23 @@ scans      (id, root_path, started_at, finished_at, status, total_bytes,
 files      (id, scan_id → scans.id, filepath, size_bytes,
             last_modified, last_accessed, is_symlink, inode)
 
-actions    (id, kind, filepath, dest_path, size_bytes, inode,
+actions    (id, kind, path, is_dir, dest_path, size_bytes, inode,
             status, created_at, completed_at, undo_token)
-            -- kind ∈ {trash, offload}; this log is both the footprint and undo record
-triage     (filepath, decision, decided_at)
+            -- kind ∈ {trash, offload}; path may be a file OR a folder (is_dir);
+            -- this log is both the footprint and the undo record
+triage     (path, is_dir, decision, decided_at)
+            -- path may be a file OR a directory (a cohort); is_dir distinguishes
             -- decision ∈ {keep, delete, offload, undecided}
 goals      (id, kind, target_bytes, threshold_bytes, created_at, status)
             -- kind ∈ {free_amount, stay_above, triage}
 ```
+
+**Triage operates on folders, not just files (v0.4).** The unit of triage and
+offload is usually a *folder cohort* ("~/School/Fall2024 — 22 GB → Offload"), not
+an individual file — nobody triages hundreds of thousands of files one at a time.
+So `triage` and `actions` key on a `path` that may be a directory (`is_dir`), with
+individual files as the exception rather than the default. Folder sizes are derived
+from the `files` rows (§7), not stored redundantly.
 
 **Retention.** All `scans` rows are kept indefinitely; each is a small summary that
 powers full-history trends. Per-file rows in `files` are kept for the most recent
@@ -130,7 +142,8 @@ Three goal types share one underlying engine:
 - **Stay above a threshold** (`stay_above`) — the latest `scans.disk_free_bytes`
   measured against `threshold_bytes`, enforced by the monitor.
 - **Triage list** (`triage`) — the `triage` table filtered to `undecided`, letting
-  the user work through flagged files over time.
+  the user work through flagged folders and files over time (§7 supplies the
+  candidates, mostly folder cohorts).
 
 ## 6. Safe-action framework
 
@@ -160,14 +173,46 @@ offload (Phase 7):
 
 ## 7. Recommendation signals
 
-- **Stale** — `last_modified` older than N months (default 12, configurable).
-  Recommendations lead with `mtime`; macOS `atime` is unreliable and treated as
-  best-effort only.
-- **Large** — top percentile by `size_bytes`, or above a fixed threshold (e.g.
-  100 MB).
-- **Large & Stale** — the flagship signal: large *and* stale, ranked by
-  `size × age`. This ranked list is the source of candidate files for Trash and
-  offload, not merely a report.
+"Large & Stale" is high-*precision* (a big, year-untouched file is almost certainly
+safe to remove) but low-*recall*: it finds only a safe sliver of what actually fills
+a disk. v0.4 broadens the signal layer and, crucially, **splits signals by the
+action they serve** — because deleting and offloading answer different questions.
+
+### Signals by action
+- **Delete suggestions** answer *"will I regret losing this?"* → lead with
+  **staleness** (and, later, **duplicates**, the safest deletes).
+- **Offload suggestions** answer *"do I need this on my primary disk right now?"* →
+  lead with **size**, with age as context only. Offload is reversible (the copy
+  lives on the external volume), so staleness is *not* a gate for it.
+
+### The signals
+- **Stale** — `last_modified` older than N months (default 12, configurable). Lead
+  with `mtime`; macOS `atime` is unreliable and treated as best-effort only.
+- **Large & Stale** — large *and* stale, ranked by `size × age`. The flagship
+  **deletion** insight (shipped).
+- **Large (any age)** — big files regardless of age, ranked by size. The primary
+  **offload** candidate list. Cheap: a query over `files` already collected.
+- **Folder rollups (cohorts)** — directories ranked by total size. This is how the
+  "school-year folder" case is surfaced and the unit most offloads act on. Cheap: an
+  aggregate over `files`; no new scanning.
+- **Duplicates** — redundant copies; the safest *deletes* (the original remains).
+  Deferred to its own later phase because it is the only signal that must read file
+  *content* (a size → partial-hash → full-hash funnel), unlike the metadata-only
+  signals above.
+
+### Folder rollup sizing (must not overstate reclaimable space)
+- **Folder size is recursive** — a folder's size is its entire subtree (itself plus
+  all descendants). Direct-only sizes are misleading (a folder whose bytes all live
+  in subfolders would appear near-empty).
+- **Surface actionable folders only** — rank directories above a size threshold;
+  collapse a folder that is essentially a single large subfolder to the meaningful
+  level. The user drills down to choose what to act on.
+- **Never double-count in a reclaimable total** — `~/School` (50 GB) *contains*
+  `~/School/Fall2024` (22 GB). When summing reclaimable space across a selection,
+  collapse overlapping paths to their topmost selected ancestor so a parent and
+  child are never counted twice. This is the folder-level form of the same
+  "never overstate reclaimable space" rule that governs APFS-clone/hardlink
+  reconciliation (§6) — get it right here first.
 
 ## 8. Phased plan
 
@@ -175,15 +220,21 @@ Detailed milestones are in `ROADMAP.md`.
 
 - **Phases 1–2 (complete)** — ingestion; Large & Stale insight end-to-end
   (advise + reveal in Finder).
-- **Phase 3 (in progress)** — storage trend over scan history.
-- **Phase 4** — auto-target home directory, record disk-space per scan, in-app
-  low-space flag.
+- **Phase 3 (complete)** — free-space-over-time trend across scan history.
+- **Phase 4 (complete)** — auto-target home directory, record disk-space per scan,
+  in-app low-space flag.
+- **Phase 4.5** — richer signals: **Large (any age)** and **folder rollups**
+  (recursive size, no parent/child double-counting), so triage has a real menu of
+  candidates. Metadata-only; no new scanning.
 - **Phase 5** — footprint and goals: `actions`, `triage`, and `goals` tables; the
-  three goal views; persistence across sessions.
+  three goal views; **folder-aware triage**; persistence across sessions.
 - **Phase 6** — safe-action framework and Move to Trash.
 - **Phase 7** — offload to external storage, including inode and iCloud
   reconciliation and disconnect-safety.
 - **Phase 8** — background agent: unattended scans and low-space notifications.
+- **Duplicates** — the size → partial-hash → full-hash funnel; the first
+  content-reading signal. Scheduled after offload (its safe-delete story is strong
+  but it must not block the cheap Phase 4.5 wins).
 
 ## 9. Success criteria
 
@@ -210,3 +261,18 @@ Detailed milestones are in `ROADMAP.md`.
    over a single footprint engine (§4).
 6. The v0.2 "macOS reality pass" is folded into offload (Phase 7) as a set of safety
    prerequisites rather than a standalone phase.
+
+**v0.4 additions (2026-08-19):**
+
+7. Signals are split by action: deletion leads with staleness (and later
+   duplicates); offload leads with size, with staleness *not* a gate (offload is
+   reversible).
+8. Triage and offload operate on **folder cohorts** by default, not individual
+   files; `triage`/`actions` key on a path that may be a directory. (Confirmed:
+   the user's reclaimable clutter is folder-shaped.)
+9. Folder sizes are recursive; reclaimable totals collapse selected paths to their
+   topmost ancestor so a parent and child are never double-counted — the
+   folder-level form of the "never overstate reclaimable space" rule.
+10. Richer signals (Large-any-age + folder rollups) land as Phase 4.5, before goals,
+    so triage sits on a real candidate menu. Duplicates stays a later, separate
+    phase (it is the only content-reading signal).

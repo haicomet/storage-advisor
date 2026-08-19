@@ -4,9 +4,10 @@
 > when: phases that each end in a runnable, demonstrable milestone. Phase numbers
 > match DESIGN.md §8.
 >
-> **Version:** aligned to DESIGN.md v0.3 (2026-08-10). Phases 1–3 are carried
-> forward from earlier versions; Phases 4–8 reflect the v0.3 direction (ongoing
-> companion: monitoring, footprint, safe actions, offload).
+> **Version:** aligned to DESIGN.md v0.4 (2026-08-19). Phases 1–4 are complete.
+> v0.4 adds Phase 4.5 (richer signals — Large-any-age + folder rollups) before the
+> footprint/goals work, and makes triage folder-aware. Duplicates is scheduled as a
+> later, separate phase (the only content-reading signal).
 
 **Guiding rule:** every phase must leave `main` in a state that could be
 demonstrated end to end. A phase that produces nothing observable is too large and
@@ -50,59 +51,73 @@ permission and symlink errors.
 
 ---
 
-## Phase 3 — Trends over time — **in progress**
+## Phase 3 — Trends over time — **complete**
 
-**Goal:** show storage growth across scans ("storage grew 8 GB since April").
+**Goal:** show a trend across scans. Landed as **free space over time** ("am I
+trending toward a full disk?"), which fits the monitoring direction better than
+scanned-folder size.
 
-**Features**
-- Query total size per completed scan over history.
-- A trends view: a line/area chart of storage over scan history.
+**Delivered**
+- `analyzer.disk_history` query + `disk_history` sidecar command + `get_disk_history`
+  Rust command + `getDiskHistory()` wrapper.
+- `TrendsView` renders "Free Space Over Time" (`disk_free_bytes` per scan).
+- Reads retained `scans` summaries (with `disk_free_bytes`), never pruned `files`
+  rows, so it spans full history. Explicit empty states for 0 and 1 scans.
 
-**Files/modules**
-- `backend/analyzer.py` — `scan_trends` query (implemented).
-- `backend/main.py` — `trends` command handler (implemented).
-- `frontend/src/components/TrendsView.tsx` — chart (implemented).
-- `frontend/src/api.ts` — `getTrends` wrapper (**remaining work**).
-
-**Depends on:** Phase 2.
-
-**Remaining work**
-- Implement `getTrends()` in `api.ts` to connect the built chart to the working
-  backend command.
-- Backend trends tests; frontend build with the charting dependency.
-
-**Notes**
-- The trend reads from retained `scans` summaries, never from pruned `files` rows,
-  so it spans full history.
-- With only one scan there is no trend; the view shows an explicit empty state.
+**Note:** the earlier scanned-folder-size query (`scan_trends` / `get_trends`)
+remains in the backend, unused; keep or remove at cleanup.
 
 ---
 
-## Phase 4 — Auto-targeting and monitoring
+## Phase 4 — Auto-targeting and monitoring — **complete**
 
-**Goal:** remove the manual path entry and begin watching the disk. The app scans
-the home directory automatically and tracks free space over time, flagging when
-storage runs low.
+**Goal:** remove manual path entry and begin watching the disk.
+
+**Delivered** (verified on macOS: auto-scan, disk status, and free-space chart all
+working)
+- Auto-scan the home directory (`~`) on launch; no path input. `start_scan` accepts
+  an optional path (`None` → home). Permission-denied is a first-class UI state with
+  Full Disk Access guidance.
+- `disk.py` (target resolution + `shutil.disk_usage`); `disk_free_bytes` /
+  `disk_total_bytes` recorded on each scan.
+- `disk_status` command + `DiskStatusBar` (free/total, usage meter, low-space flag);
+  in-app timer polls every 10 s.
+
+---
+
+## Phase 4.5 — Richer signals (offload candidates + folder cohorts)
+
+**Goal:** broaden recommendations beyond the "Large & Stale" sliver so triage and
+offload have a real menu of candidates — and make folders the primary unit. All
+metadata-only: queries over the `files` rows already collected, no new scanning.
 
 **Features**
-- Auto-scan the home directory (`~`) on launch; no path input. Handle the Full Disk
-  Access prompt and the denied case gracefully.
-- Record `disk_free_bytes` and `disk_total_bytes` on each scan.
-- In-app timer: while open, periodically check free space and flag the user when it
-  drops below a threshold.
+- **Large (any age)** query — big files ranked by size, the primary *offload*
+  candidate list (staleness is not a gate for offload; it is reversible).
+- **Folder rollups** — directories ranked by **recursive** total size (a folder =
+  its whole subtree). Surfaces the "school-year folder" cohort case.
+- **No double-counting** — when totalling reclaimable space across a selection,
+  collapse overlapping paths to their topmost selected ancestor so a parent and
+  child are never counted twice (folder-level form of the §6 reclaimable-space rule).
+- Signals split by action in the UI: **delete** view leads with stale; **offload**
+  view leads with size / folders.
 
 **Files/modules**
-- `backend/scanner.py` / a small target-resolution helper (home directory).
-- `backend/database.py` — add `disk_*` columns to `scans`.
-- `backend/analyzer.py` — free-space history query (extends the trends query).
-- `frontend/src/` — remove the path input; add a disk-status / low-space indicator.
+- `backend/analyzer.py` — `large_files(...)` and `folder_rollups(...)` queries.
+- `backend/main.py` — `large_files` / `folder_rollups` commands.
+- `frontend/src-tauri/src/lib.rs` — matching forwarder commands.
+- `frontend/src/` — `types.ts` FolderRollup/large-file shapes; `api.ts` wrappers; an
+  offload-candidates view (folders first, drill-down to files).
 
-**Depends on:** Phase 3 (reuses the scan-history and trend plumbing).
+**Depends on:** Phase 4 (uses the populated `files` table).
 
 **Considerations**
-- Full Disk Access is a first-class state, not an error path.
-- Disk-space capture should be part of the scan summary so a single history powers
-  both the size trend and the free-space trend.
+- Folder size is recursive, not direct-only; rank actionable folders above a size
+  threshold and let the user drill down.
+- Reclaimable totals must never double-count parent + child — same principle as
+  APFS-clone reconciliation, practised here first on the cheaper folder case.
+- Duplicates are explicitly *not* here — that signal reads file content and is a
+  later, separate phase.
 
 ---
 
@@ -113,22 +128,27 @@ so storage cleanup becomes an ongoing, trackable effort rather than a one-shot
 report.
 
 **Features**
-- New tables: `actions` (the action log / footprint), `triage` (per-file
-  keep/delete/offload decisions), `goals`.
+- New tables: `actions` (the action log / footprint), `triage` (keep/delete/offload
+  decisions), `goals`. `triage` and `actions` key on a `path` that may be a
+  **directory** (`is_dir`) — triage is folder-first (§4 of DESIGN).
 - Three goal types as views over the footprint: free a target amount, stay above a
   threshold, and a persistent triage list.
 - Goal progress surfaced in the UI and persisted across restarts.
 
 **Files/modules**
 - `backend/database.py` — `actions`, `triage`, `goals` tables (never prune
-  `actions`).
+  `actions`; `path` + `is_dir`).
 - `backend/analyzer.py` — goal-progress queries.
 - `backend/main.py` — commands to create/read goals and record triage decisions.
-- `frontend/src/` — a goals view and per-file triage controls in the results table.
+- `frontend/src/` — a goals view; **folder-level** triage controls (keep/delete/
+  offload on a cohort), individual files as the exception.
 
-**Depends on:** Phase 4 (goals reference disk-space history and, later, actions).
+**Depends on:** Phase 4.5 (triage operates on the folder/large-file candidates it
+produces) and Phase 4 (disk-space history).
 
 **Considerations**
+- Triage is folder-first: the unit is usually a cohort ("~/School/Fall2024"), not a
+  single file. Drive it from the Phase 4.5 candidate lists.
 - Goals are three views over one engine (action log + disk-space history + triage
   tags); model the shared engine once.
 - The `actions` table is defined here but only populated once actions ship (Phase
@@ -217,15 +237,47 @@ actionable recommendations).
 
 ---
 
+## Duplicates — content-based detection (later, separate)
+
+**Goal:** find redundant copies — the *safest* deletes, since the original remains.
+Scheduled after offload: its story is strong but it must not block the cheap
+Phase 4.5 signal wins, and it is the first feature that reads file *content*.
+
+**Features**
+- A size → partial-hash → full-hash funnel: group by `size_bytes`, then hash a
+  prefix of same-size files, then full-hash only the survivors — so hashing cost
+  stays proportional to actual duplication, not to the whole disk.
+- Present duplicate sets with a safe default (keep one, offer to Trash the rest).
+
+**Files/modules**
+- `backend/scanner.py` / a new hashing module — the funnel (content reads).
+- `backend/analyzer.py` — duplicate-set query; `backend/main.py` — command.
+- `frontend/src/` — duplicate-sets view feeding the same triage/actions flow.
+
+**Depends on:** Phase 6 (safe-action framework, for the delete). Independent of the
+metadata signals, so it can slot in whenever content-hashing is worth the cost.
+
+**Considerations**
+- This is the only signal that reads bytes, not just metadata — budget for the cost
+  and keep the funnel tight.
+- Reconcile against inode/clone data (§Phase 7): two paths sharing one inode are not
+  true duplicates to reclaim.
+
+---
+
 ## Suggested order and rationale
 
-Phases 1–3 establish and visualize the data. Phase 4 makes the app proactive
-(auto-target + monitoring) and Phase 5 makes it persistent (footprint + goals) —
-together turning a report into a companion. Phase 6 introduces safe action on the
-lowest-risk operation, and Phase 7 reuses that same framework for the high-value,
-high-risk offload. Phase 8 extends monitoring beyond the app's runtime.
+Phases 1–4 establish, visualize, and monitor the data — the app is already proactive.
+Phase 4.5 broadens the signal layer cheaply (Large-any-age + folder rollups) so the
+following phases triage the *right* things — folder cohorts, not a stale sliver.
+Phase 5 makes the app persistent (footprint + goals) on top of those candidates.
+Phase 6 introduces safe action on the lowest-risk operation (Trash), and Phase 7
+reuses that framework for the high-value, high-risk offload. Phase 8 extends
+monitoring beyond the app's runtime. Duplicates is a later, self-contained addition —
+the first content-reading signal — that reuses the Phase 6 action framework.
 
-The dependency spine is 4 → 5 → 6 → 7, with 8 building on Phase 4's monitoring.
-Offload is deliberately last among the action features: it is the riskiest
-operation and must inherit a safety framework that has already been proven on
-reversible actions.
+The dependency spine is 4 → 4.5 → 5 → 6 → 7, with 8 building on Phase 4's monitoring
+and Duplicates hanging off Phase 6. Offload is deliberately last among the action
+features: it is the riskiest operation and must inherit a safety framework already
+proven on reversible actions. Folders are the primary unit of triage and offload
+throughout (confirmed: the user's reclaimable clutter is folder-shaped).
