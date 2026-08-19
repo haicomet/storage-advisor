@@ -8,6 +8,8 @@ the `files`/`scans` tables.
 import sqlite3
 import time
 import datetime
+import os
+from collections import defaultdict
 
 # Default thresholds for the "Large & Stale" signal. These are the concrete,
 # user-visible numbers DESIGN.md §5 insists on (no vague adjectives).
@@ -109,8 +111,33 @@ def large_files(
       - Map rows through _human_size(). No evidence string / no mtime needed —
         size is the whole story here.
     """
-    # TODO: implement
-    raise NotImplementedError
+    if scan_id is None:
+        scan_id = get_latest_scan_id(conn)
+        if scan_id is None:
+            return []
+
+    query = """
+        SELECT filepath, size_bytes FROM files
+        WHERE scan_id = ? AND size_bytes >= ?
+        ORDER BY size_bytes DESC
+        LIMIT ?
+        """
+
+    cursor = conn.execute(query, (scan_id, min_size_bytes, limit))
+
+    results = []
+    for row in cursor:
+        size = row["size_bytes"]
+
+        results.append(
+            {
+                "filepath": row["filepath"],
+                "size_bytes": size,
+                "size_human": _human_size(size)
+            }
+        )
+
+    return results
 
 
 def folder_rollups(
@@ -125,30 +152,49 @@ def folder_rollups(
     Surfaces the "school-year folder" case: the unit most offloads act on is a
     folder, not a single file. Each dict: {path, total_bytes, total_human,
     file_count}.
-
-    RECURSIVE SIZE (DESIGN.md §7): a folder's size is its entire subtree (itself
-    plus all descendants), not just files directly inside it. A file at
-    /a/b/c.mov contributes its bytes to /a/b, /a, and every ancestor.
-
-    TODO:
-      - Resolve scan_id via get_latest_scan_id() when None; return [] if still None.
-      - For each file row (filepath, size_bytes) in the scan, attribute its size to
-        every ancestor directory. Two viable approaches:
-          (a) In Python: iterate files, walk os.path.dirname up to the scan root,
-              accumulate {dir: [bytes, count]} in a dict. Simple, one pass.
-          (b) In SQL: harder to do ancestor rollup portably in sqlite; (a) is
-              clearer for this scale.
-      - Filter to directories with total_bytes >= min_size_bytes, ORDER BY
-        total_bytes DESC, take `limit`. Map through _human_size().
-
-    DO NOT compute a combined "reclaimable total" here that sums overlapping
-    folders — a parent already includes its children, so summing double-counts.
-    That collapse-to-topmost-ancestor rule belongs at SELECTION time (when the
-    user picks folders to act on), not in this per-folder listing. See
-    DESIGN.md §7 / §6 "never overstate reclaimable space".
     """
-    # TODO: implement
-    raise NotImplementedError
+    if scan_id is None:
+        scan_id = get_latest_scan_id(conn)
+        if scan_id is None:
+            return []
+
+    folder_stats = defaultdict(lambda: [0,0])
+
+    query = """
+        SELECT filepath, size_bytes FROM files
+        WHERE scan_id = ?
+    """
+    cursor = conn.execute(query, (scan_id,))
+
+    for row in cursor:
+        filepath = row["filepath"]
+        curr_dir = os.path.dirname(filepath)
+
+        while curr_dir != "/" and curr_dir != "":
+            folder_stats[curr_dir][0] += row["size_bytes"]
+            folder_stats[curr_dir][1] += 1
+            curr_dir = os.path.dirname(curr_dir)
+
+    results = []
+
+    for folder_path, stats in folder_stats.items():
+        total_bytes = stats[0]
+        file_count = stats[1]
+
+        if total_bytes >= min_size_bytes:
+            results.append(
+                {
+                    "path": folder_path,
+                    "total_bytes": total_bytes,
+                    "total_human": _human_size(total_bytes),
+                    "file_count": file_count
+                }
+            )
+
+    results.sort(key=lambda x: x["total_bytes"], reverse=True)
+    limited_results = results[:limit]
+
+    return limited_results
 
 
 def scan_trends(conn: sqlite3.Connection, *, limit: int | None = None) -> list[dict]:
