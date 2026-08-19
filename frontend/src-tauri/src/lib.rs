@@ -160,6 +160,24 @@ async fn get_disk_status(state: State<'_, SidecarState>) -> Result<Value, String
 }
 
 #[tauri::command]
+async fn large_files(limit: Option<u32>, min_size_bytes: Option<u64>, state: State<'_, SidecarState>) -> Result<Value, String> {
+    send_request(
+        "large_files",
+        json!({ "limit": limit, "min_size_bytes": min_size_bytes }),
+        state,
+    )
+}
+
+#[tauri::command]
+async fn folder_rollups(limit: Option<u32>, min_size_bytes: Option<u64>, state: State<'_, SidecarState>) -> Result<Value, String> {
+    send_request(
+        "folder_rollups",
+        json!({ "limit": limit, "min_size_bytes": min_size_bytes }),
+        state,
+    )
+}
+
+#[tauri::command]
 fn reveal_in_finder(filepath: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
@@ -200,6 +218,8 @@ pub fn run() {
             get_trends,
             get_disk_history,
             get_disk_status,
+            large_files,
+            folder_rollups,
             reveal_in_finder
         ])
         .run(tauri::generate_context!())
