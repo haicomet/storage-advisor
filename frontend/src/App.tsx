@@ -12,14 +12,18 @@ import ScanView from "./components/ScanView";
 import ResultsTable from "./components/ResultsTable";
 import TrendsView from "./components/TrendsView";
 import DiskStatusBar from "./components/DiskStatusBar";
-import { topLargeStale, getDiskHistory, getDiskStatus } from "./api";
-import type { FileRow, ScanResult, DiskHistoryPoint, DiskStatus } from "./types";
+import OffloadCandidatesView from "./components/OffloadCandidatesView";
+import { topLargeStale, getDiskHistory, getDiskStatus, getLargeFiles, getFolderRollups } from "./api";
+import type { FileRow, ScanResult, DiskHistoryPoint, DiskStatus, LargeFile, FolderRollup } from "./types";
 import "./App.css";
 
 function App() {
   const [_results, _setResults] = useState<FileRow[]>([]);
   const [trends, setTrends] = useState<DiskHistoryPoint[]>([]);
   const [diskStatus, setDiskStatus] = useState<DiskStatus | null>(null);
+  // Phase 4.5: offload candidates — folders (cohorts) first, then large files.
+  const [largeFiles, setLargeFiles] = useState<LargeFile[]>([]);
+  const [folders, setFolders] = useState<FolderRollup[]>([]);
   const [hasScanned, setHasScanned] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -61,6 +65,11 @@ function App() {
       const items = await topLargeStale(50, 12);
       _setResults(items);
 
+      // Phase 4.5: offload candidates — folders (cohorts) + largest files, size-led.
+      // TODO: once getFolderRollups/getLargeFiles are implemented, populate these:
+      //   setFolders(await getFolderRollups(50));
+      //   setLargeFiles(await getLargeFiles(50));
+
       const points = await getDiskHistory();
       setTrends(points);
 
@@ -80,6 +89,9 @@ function App() {
 
       <ScanView onScanComplete={handleScanComplete} />
       <TrendsView points={trends} />
+      {/* Offload candidates (size-led, folders first) — Phase 4.5 */}
+      <OffloadCandidatesView folders={folders} files={largeFiles} />
+      {/* Large & Stale (deletion-oriented) */}
       <ResultsTable items={_results} hasScanned={hasScanned} />
     </main>
   );

@@ -9,7 +9,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { FileRow, ScanProgress, ScanResult, TrendPoint, DiskStatus, DiskHistoryPoint } from "./types";
+import type { FileRow, ScanProgress, ScanResult, TrendPoint, DiskStatus, DiskHistoryPoint, LargeFile, FolderRollup } from "./types";
 
 /**
  * Start a scan, receiving streamed progress via `onProgress`.
@@ -72,6 +72,30 @@ export async function getTrends(): Promise<TrendPoint[]> {
 
   const response = await invoke<{ points: TrendPoint[] }>("get_trends");
   return response.points;
+}
+
+/**
+ * Fetch the largest files (offload candidates, ranked by size — no staleness).
+ *
+ * TODO:
+ *   - invoke<{ items: LargeFile[] }>("get_large_files", { limit }) and return
+ *     response.items (mirror topLargeStale's envelope unwrap).
+ */
+export async function getLargeFiles(_limit?: number): Promise<LargeFile[]> {
+  // TODO: implement
+  throw new Error("not implemented");
+}
+
+/**
+ * Fetch folder cohorts ranked by recursive total size (the offload/triage unit).
+ *
+ * TODO:
+ *   - invoke<{ folders: FolderRollup[] }>("get_folder_rollups", { limit }) and
+ *     return response.folders.
+ */
+export async function getFolderRollups(_limit?: number): Promise<FolderRollup[]> {
+  // TODO: implement
+  throw new Error("not implemented");
 }
 
 /**

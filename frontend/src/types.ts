@@ -61,3 +61,20 @@ export interface DiskHistoryPoint {
   disk_total_bytes: number;
   free_human: string; // e.g. "35.9 GB" — tooltip
 }
+
+// A large file, ranked by size only (offload candidate). Mirrors
+// analyzer.large_files() output. No staleness — offload leads with size (§7).
+export interface LargeFile {
+  filepath: string;
+  size_bytes: number;
+  size_human: string; // e.g. "4.2 GB"
+}
+
+// A folder cohort ranked by RECURSIVE total size. Mirrors analyzer.folder_rollups().
+// The primary unit of offload/triage — the "school-year folder" case.
+export interface FolderRollup {
+  path: string;
+  total_bytes: number; // recursive: whole subtree, not just direct files
+  total_human: string; // e.g. "22 GB"
+  file_count: number;
+}

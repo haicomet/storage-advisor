@@ -132,6 +132,20 @@ async fn get_trends(state: State<'_, SidecarState>) -> Result<Value, String> {
 }
 
 #[tauri::command]
+async fn get_large_files(limit: Option<u32>, state: State<'_, SidecarState>) -> Result<Value, String> {
+    // Forward to the sidecar's `large_files` command — biggest files by size,
+    // the offload candidate list. Returns raw { items: [...] }.
+    send_request("large_files", json!({ "limit": limit }), state)
+}
+
+#[tauri::command]
+async fn get_folder_rollups(limit: Option<u32>, state: State<'_, SidecarState>) -> Result<Value, String> {
+    // Forward to the sidecar's `folder_rollups` command — directories by recursive
+    // size (cohorts). Returns raw { folders: [...] }.
+    send_request("folder_rollups", json!({ "limit": limit }), state)
+}
+
+#[tauri::command]
 async fn get_disk_history(state: State<'_, SidecarState>) -> Result<Value, String> {
     // Forward to the sidecar's `disk_history` command — free space per scan over
     // time. Returns the raw { points: [...] } result Value.
@@ -181,6 +195,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             start_scan,
             top_large_stale,
+            get_large_files,
+            get_folder_rollups,
             get_trends,
             get_disk_history,
             get_disk_status,
