@@ -104,7 +104,7 @@ def handle_scan(req_id: str, args: dict) -> None:
     except Exception as e:
         log(f"[scan] Failed: {e}")
         database.finish_scan(scan_id, int(time.time()), total_bytes, status=f"failed: {str(e)}")
-        
+
         # Map permission errors specifically, otherwise default to a generic error
         error_code = "PERMISSION_DENIED" if isinstance(e, PermissionError) else "SCAN_ERROR"
         send({
@@ -123,22 +123,22 @@ def handle_top_large_stale(req_id: str, args: dict) -> None:
     limit = args.get("limit", analyzer.DEFAULT_LIMIT)
     stale_months = args.get("stale_months", analyzer.DEFAULT_STALE_MONTHS)
     min_size_bytes = args.get("min_size_bytes", analyzer.DEFAULT_MIN_SIZE_BYTES)
-    
+
     try:
         with database.get_db_connection() as conn:
             items = analyzer.top_large_stale(
                 conn,
-                limit=limit, 
-                stale_months=stale_months, 
+                limit=limit,
+                stale_months=stale_months,
                 min_size_bytes=min_size_bytes
             )
-            
+
         send({
             "id": req_id,
             "type": "result",
             "data": {"items": items}
         })
-        
+
     except Exception as e:
         log(f"[top_large_stale] Error: {e}")
         send({
@@ -151,24 +151,24 @@ def handle_top_large_stale(req_id: str, args: dict) -> None:
 def handle_trends(req_id: str, args: dict) -> None:
     """Handle a `trends` request: return total-size-per-scan over history."""
     log("[trends] Fetching historical scan trends...")
-    
+
     # Pull optional limit, defaulting to None if not provided
     limit = args.get("limit")
-    
+
     try:
         with database.get_db_connection() as conn:
             points = analyzer.scan_trends(
                 conn,
                 limit=limit
             )
-            
+
         send({
             "id": req_id,
             "type": "result",
             "data": {"points": points}
         })
         log(f"[trends] Returned {len(points)} trend points")
-        
+
     except Exception as e:
         log(f"[trends] Error: {e}")
         send({
@@ -184,13 +184,33 @@ def handle_large_files(req_id: str, args: dict) -> None:
 
     Emits one {type:"result", data:{items:[file, ...]}}.
 
-    TODO:
-      - Pull optional limit / min_size_bytes from args (fall back to defaults).
-      - Open a connection, call analyzer.large_files(...), send items back.
-      - Mirror handle_top_large_stale's try/except with QUERY_ERROR on failure.
     """
-    # TODO: implement
-    raise NotImplementedError
+    limit = args.get("limit", analyzer.DEFAULT_LIMIT)
+    min_size_bytes = args.get("min_size_bytes", analyzer.DEFAULT_MIN_SIZE_BYTES)
+
+    try:
+        with database.get_db_connection() as conn:
+            items = analyzer.large_files(
+                conn,
+                limit=limit,
+                min_size_bytes=min_size_bytes
+            )
+
+        send({
+            "id": req_id,
+            "type": "result",
+            "data": {"items": items}
+        })
+
+    except Exception as e:
+        log(f"[large_files] Error: {e}")
+        send({
+            "id": req_id,
+            "type": "error",
+            "error": {"code": "QUERY_ERROR", "message": str(e)}
+        })
+
+
 
 
 def handle_folder_rollups(req_id: str, args: dict) -> None:
@@ -198,13 +218,34 @@ def handle_folder_rollups(req_id: str, args: dict) -> None:
 
     Emits one {type:"result", data:{folders:[rollup, ...]}}.
 
-    TODO:
-      - Pull optional limit / min_size_bytes from args.
-      - Open a connection, call analyzer.folder_rollups(...), send under `folders`.
-      - Same error handling as the other query handlers.
     """
-    # TODO: implement
-    raise NotImplementedError
+    limit = args.get("limit", analyzer.DEFAULT_LIMIT)
+    min_size_bytes = args.get("min_size_bytes", analyzer.DEFAULT_MIN_SIZE_BYTES)
+
+    try:
+        with database.get_db_connection() as conn:
+            items = analyzer.folder_rollups(
+                conn,
+                limit=limit,
+                min_size_bytes=min_size_bytes
+            )
+
+        send({
+            "id": req_id,
+            "type": "result",
+            "data": {"folders": items}
+        })
+
+    except Exception as e:
+        log(f"[folder_rollups] Error: {e}")
+        send({
+            "id": req_id,
+            "type": "error",
+            "error": {"code": "QUERY_ERROR", "message": str(e)}
+        })
+
+
+
 
 
 def handle_disk_history(req_id: str, args: dict) -> None:
