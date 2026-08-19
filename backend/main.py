@@ -179,6 +179,37 @@ def handle_trends(req_id: str, args: dict) -> None:
 
 
 
+def handle_disk_history(req_id: str, args: dict) -> None:
+    """Handle a `disk_history` request: free-space-per-scan over history.
+
+    Emits one {type:"result", data:{points:[disk history point, ...]}}. This is
+    the free-space trend (how full the disk is over time) — distinct from the
+    `trends` command, which tracks scanned-folder size.
+    """
+    log("[disk_history] Fetching free-space history...")
+
+    limit = args.get("limit")
+
+    try:
+        with database.get_db_connection() as conn:
+            points = analyzer.disk_history(conn, limit=limit)
+
+        send({
+            "id": req_id,
+            "type": "result",
+            "data": {"points": points}
+        })
+        log(f"[disk_history] Returned {len(points)} points")
+
+    except Exception as e:
+        log(f"[disk_history] Error: {e}")
+        send({
+            "id": req_id,
+            "type": "error",
+            "error": {"code": "QUERY_ERROR", "message": str(e)}
+        })
+
+
 def handle_disk_status(req_id: str, args: dict) -> None:
     """Handle a `disk_status` request: report current free/total space + low flag."""
 
@@ -218,6 +249,7 @@ COMMANDS = {
     "scan": handle_scan,
     "top_large_stale": handle_top_large_stale,
     "trends": handle_trends,
+    "disk_history": handle_disk_history,
     "disk_status": handle_disk_status,
 }
 

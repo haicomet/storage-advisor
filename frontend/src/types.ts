@@ -51,3 +51,13 @@ export interface DiskStatus {
   percent_free: number; // 0–100
   is_low: boolean; // true when at/below the low-space threshold
 }
+
+// One point on the free-space trend: how much disk was free at one scan.
+// Mirrors analyzer.disk_history() output. Powers the "Free Space Over Time" chart.
+export interface DiskHistoryPoint {
+  scan_id: number;
+  started_at: number; // epoch seconds — chart x-axis
+  disk_free_bytes: number; // chart y-axis
+  disk_total_bytes: number;
+  free_human: string; // e.g. "35.9 GB" — tooltip
+}
