@@ -16,13 +16,6 @@ interface ResultsTableProps {
 }
 
 export default function ResultsTable({ items, hasScanned }: ResultsTableProps) {
-  if (!hasScanned) {
-    return (
-      <section className="empty-state">
-        <p>Enter a path above and click Scan to find large, stale files.</p>
-      </section>
-    );
-  }
 
   if (items.length === 0) {
     return (

@@ -111,7 +111,7 @@ fn send_request(
 // Tauri commands (exposed to React)
 
 #[tauri::command]
-async fn start_scan(path: String, state: State<'_, SidecarState>) -> Result<Value, String> {
+async fn start_scan(path: Option<String>, state: State<'_, SidecarState>) -> Result<Value, String> {
     send_request("scan", json!({ "path": path }), state)
 }
 
