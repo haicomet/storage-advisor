@@ -13,3 +13,6 @@ target/
 # Python
 *.pyc
 .pytest_cache/
+
+# Local agent/editor tooling
+.claude/

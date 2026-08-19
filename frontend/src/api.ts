@@ -9,7 +9,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { FileRow, ScanProgress, ScanResult, TrendPoint, DiskStatus } from "./types";
+import type { FileRow, ScanProgress, ScanResult, TrendPoint, DiskStatus, DiskHistoryPoint } from "./types";
 
 /**
  * Start a scan, receiving streamed progress via `onProgress`.
@@ -71,6 +71,14 @@ export async function revealInFinder(filepath: string): Promise<void> {
 export async function getTrends(): Promise<TrendPoint[]> {
 
   const response = await invoke<{ points: TrendPoint[] }>("get_trends");
+  return response.points;
+}
+
+/**
+ * Fetch free-space-per-scan over history for the "Free Space Over Time" chart.
+ */
+export async function getDiskHistory(): Promise<DiskHistoryPoint[]> {
+  const response = await invoke<{ points: DiskHistoryPoint[] }>("get_disk_history");
   return response.points;
 }
 

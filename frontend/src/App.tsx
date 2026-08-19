@@ -12,13 +12,13 @@ import ScanView from "./components/ScanView";
 import ResultsTable from "./components/ResultsTable";
 import TrendsView from "./components/TrendsView";
 import DiskStatusBar from "./components/DiskStatusBar";
-import { topLargeStale, getTrends, getDiskStatus } from "./api";
-import type { FileRow, ScanResult, TrendPoint, DiskStatus } from "./types";
+import { topLargeStale, getDiskHistory, getDiskStatus } from "./api";
+import type { FileRow, ScanResult, DiskHistoryPoint, DiskStatus } from "./types";
 import "./App.css";
 
 function App() {
   const [_results, _setResults] = useState<FileRow[]>([]);
-  const [trends, setTrends] = useState<TrendPoint[]>([]);
+  const [trends, setTrends] = useState<DiskHistoryPoint[]>([]);
   const [diskStatus, setDiskStatus] = useState<DiskStatus | null>(null);
   const [hasScanned, setHasScanned] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -32,8 +32,8 @@ function App() {
 
     refreshDiskStatus();
 
-    // Load historical trends on mount if they exist
-    getTrends().then(setTrends).catch(console.error);
+    // Load free-space history on mount if it exists
+    getDiskHistory().then(setTrends).catch(console.error);
 
     // Keep the monitor alive by polling every 10 seconds
     const intervalId = setInterval(refreshDiskStatus, 10000);
@@ -61,7 +61,7 @@ function App() {
       const items = await topLargeStale(50, 12);
       _setResults(items);
 
-      const points = await getTrends();
+      const points = await getDiskHistory();
       setTrends(points);
 
       await refreshDiskStatus();

@@ -132,6 +132,13 @@ async fn get_trends(state: State<'_, SidecarState>) -> Result<Value, String> {
 }
 
 #[tauri::command]
+async fn get_disk_history(state: State<'_, SidecarState>) -> Result<Value, String> {
+    // Forward to the sidecar's `disk_history` command — free space per scan over
+    // time. Returns the raw { points: [...] } result Value.
+    send_request("disk_history", json!({}), state)
+}
+
+#[tauri::command]
 async fn get_disk_status(state: State<'_, SidecarState>) -> Result<Value, String> {
     // Forward to the sidecar's `disk_status` command — a cheap live read of how
     // full the volume is (free/total/percent + low-space flag). No scan needed.
@@ -175,6 +182,7 @@ pub fn run() {
             start_scan,
             top_large_stale,
             get_trends,
+            get_disk_history,
             get_disk_status,
             reveal_in_finder
         ])
