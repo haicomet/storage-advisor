@@ -179,6 +179,34 @@ def handle_trends(req_id: str, args: dict) -> None:
 
 
 
+def handle_large_files(req_id: str, args: dict) -> None:
+    """Handle a `large_files` request: biggest files by size (offload candidates).
+
+    Emits one {type:"result", data:{items:[file, ...]}}.
+
+    TODO:
+      - Pull optional limit / min_size_bytes from args (fall back to defaults).
+      - Open a connection, call analyzer.large_files(...), send items back.
+      - Mirror handle_top_large_stale's try/except with QUERY_ERROR on failure.
+    """
+    # TODO: implement
+    raise NotImplementedError
+
+
+def handle_folder_rollups(req_id: str, args: dict) -> None:
+    """Handle a `folder_rollups` request: directories by recursive size (cohorts).
+
+    Emits one {type:"result", data:{folders:[rollup, ...]}}.
+
+    TODO:
+      - Pull optional limit / min_size_bytes from args.
+      - Open a connection, call analyzer.folder_rollups(...), send under `folders`.
+      - Same error handling as the other query handlers.
+    """
+    # TODO: implement
+    raise NotImplementedError
+
+
 def handle_disk_history(req_id: str, args: dict) -> None:
     """Handle a `disk_history` request: free-space-per-scan over history.
 
@@ -248,6 +276,8 @@ def handle_disk_status(req_id: str, args: dict) -> None:
 COMMANDS = {
     "scan": handle_scan,
     "top_large_stale": handle_top_large_stale,
+    "large_files": handle_large_files,
+    "folder_rollups": handle_folder_rollups,
     "trends": handle_trends,
     "disk_history": handle_disk_history,
     "disk_status": handle_disk_status,
