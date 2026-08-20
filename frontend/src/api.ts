@@ -69,16 +69,16 @@ export async function getTrends(): Promise<TrendPoint[]> {
 /**
  * Fetch the largest files (offload candidates, ranked by size — no staleness).
  */
-export async function getLargeFiles(_limit?: number): Promise<LargeFile[]> {
-  const response = await invoke<{items: LargeFile[] }>("get_large_files", { _limit })
+export async function getLargeFiles(limit?: number): Promise<LargeFile[]> {
+  const response = await invoke<{ items: LargeFile[] }>("get_large_files", { limit })
   return response.items
 }
 
 /**
  * Fetch folder cohorts ranked by recursive total size (the offload/triage unit).
  */
-export async function getFolderRollups(_limit?: number): Promise<FolderRollup[]> {
-  const response = await invoke<{ folders: FolderRollup[] }>("get_folder_rollups", { _limit });
+export async function getFolderRollups(limit?: number): Promise<FolderRollup[]> {
+  const response = await invoke<{ folders: FolderRollup[] }>("get_folder_rollups", { limit });
   return response.folders
 }
 
