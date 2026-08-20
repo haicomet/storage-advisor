@@ -21,7 +21,6 @@ function App() {
   const [_results, _setResults] = useState<FileRow[]>([]);
   const [trends, setTrends] = useState<DiskHistoryPoint[]>([]);
   const [diskStatus, setDiskStatus] = useState<DiskStatus | null>(null);
-  // Phase 4.5: offload candidates — folders (cohorts) first, then large files.
   const [largeFiles, setLargeFiles] = useState<LargeFile[]>([]);
   const [folders, setFolders] = useState<FolderRollup[]>([]);
   const [hasScanned, setHasScanned] = useState(false);
@@ -65,10 +64,8 @@ function App() {
       const items = await topLargeStale(50, 12);
       _setResults(items);
 
-      // Phase 4.5: offload candidates — folders (cohorts) + largest files, size-led.
-      // TODO: once getFolderRollups/getLargeFiles are implemented, populate these:
-      //   setFolders(await getFolderRollups(50));
-      //   setLargeFiles(await getLargeFiles(50));
+      setFolders(await getFolderRollups(50));
+      setLargeFiles(await getLargeFiles(50));
 
       const points = await getDiskHistory();
       setTrends(points);
