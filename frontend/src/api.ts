@@ -13,14 +13,6 @@ import type { FileRow, ScanProgress, ScanResult, TrendPoint, DiskStatus, DiskHis
 
 /**
  * Start a scan, receiving streamed progress via `onProgress`.
- *
- * Phase 4: `path` is now OPTIONAL — when omitted, the backend auto-targets the
- * home directory. Pass a path only for user-added roots (e.g. an external SSD).
- *
- * TODO:
- *   - Make the invoke send `{ path }` where path may be undefined; the Rust
- *     command takes it and the sidecar resolves an absent path to home.
- *     (Confirm the Rust `start_scan` signature accepts an optional path.)
  */
 export async function startScan(
   path: string | undefined,
@@ -33,7 +25,7 @@ export async function startScan(
   });
   try {
     // trigger the scan, this promise won't resolve until Python finishes
-    const result = await invoke<ScanResult>("start_scan", { path });
+    const result = await invoke<ScanResult>("start_scan", { path: path ?? null });
     return result;
   } finally {
     // guarantee we clean up the listener whether the scan succeeds or fails,
@@ -54,7 +46,7 @@ export async function topLargeStale(
     limit,
     staleMonths,
   });
-  
+
   return response.items;
 }
 
@@ -76,26 +68,18 @@ export async function getTrends(): Promise<TrendPoint[]> {
 
 /**
  * Fetch the largest files (offload candidates, ranked by size — no staleness).
- *
- * TODO:
- *   - invoke<{ items: LargeFile[] }>("get_large_files", { limit }) and return
- *     response.items (mirror topLargeStale's envelope unwrap).
  */
 export async function getLargeFiles(_limit?: number): Promise<LargeFile[]> {
-  // TODO: implement
-  throw new Error("not implemented");
+  const response = await invoke<{items: LargeFile[] }>("get_large_files", { _limit })
+  return response.items
 }
 
 /**
  * Fetch folder cohorts ranked by recursive total size (the offload/triage unit).
- *
- * TODO:
- *   - invoke<{ folders: FolderRollup[] }>("get_folder_rollups", { limit }) and
- *     return response.folders.
  */
 export async function getFolderRollups(_limit?: number): Promise<FolderRollup[]> {
-  // TODO: implement
-  throw new Error("not implemented");
+  const response = await invoke<{ folders: FolderRollup[] }>("get_folder_rollups", { _limit });
+  return response.folders
 }
 
 /**
