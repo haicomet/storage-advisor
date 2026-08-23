@@ -61,7 +61,10 @@ def test_scan_missing_path_auto_targets_home(sent, monkeypatch):
     monkeypatch.setattr(main.scanner, "scan_directory", lambda path, progress_callback=None: iter([]))
     main.handle_scan("r1", {})
     assert sent[-1]["type"] == "result"
-    # TODO (when disk capture lands): also assert disk_free_bytes is in the result.
+    # The scan result carries a disk-space snapshot so the UI can flag low space
+    # immediately without a second disk_status call.
+    assert "disk_free_bytes" in sent[-1]["data"]
+    assert "disk_total_bytes" in sent[-1]["data"]
 
 
 def test_scan_streams_progress_then_result(sent, tmp_path):
@@ -113,19 +116,67 @@ def test_top_large_stale_returns_items_list(sent, tmp_path):
 
 def test_trends_returns_points_list(sent, tmp_path):
     """After a scan, the trends command returns a result with a points list."""
-    # TODO: scan a subdir (so the test DB isn't counted — see
-    #   test_scan_streams_progress_then_result), then main.handle_trends("r2", {}).
-    #   Assert sent[-1]["type"] == "result" and "points" in sent[-1]["data"], and
-    #   that the point's total_bytes matches the scanned bytes.
-    raise NotImplementedError
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / "a.txt").write_text("hello")
+
+    main.handle_scan("r1", {"path": str(target)})
+    main.handle_trends("r2", {})
+
+    terminal = sent[-1]
+    assert terminal["id"] == "r2"
+    assert terminal["type"] == "result"
+    assert "points" in terminal["data"]
+    assert len(terminal["data"]["points"]) == 1
 
 
 # --- handle_disk_status (Phase 4) --------------------------------------------
 
-def test_disk_status_returns_status(sent):
+def test_disk_status_returns_status(sent, monkeypatch):
     """disk_status returns a live free/total/low-flag reading without a scan."""
-    # TODO: call main.handle_disk_status("d1", {}); assert sent[-1]["type"] ==
-    #   "result" and the data has free_bytes / total_bytes / is_low. This is a
-    #   live read of the real volume, so assert on presence/types, not exact
-    #   values (or monkeypatch main.disk.get_disk_usage for determinism).
-    raise NotImplementedError
+    # Monkeypatch the volume read for a deterministic result.
+    monkeypatch.setattr(main.disk, "get_disk_usage", lambda path: (300, 1000))
+    main.handle_disk_status("d1", {})
+
+    terminal = sent[-1]
+    assert terminal["id"] == "d1"
+    assert terminal["type"] == "result"
+    data = terminal["data"]
+    assert data["free_bytes"] == 300
+    assert data["total_bytes"] == 1000
+    assert data["used_bytes"] == 700
+    assert data["is_low"] is False  # 30% free is above the 10% threshold
+
+
+# --- handle_large_files / handle_folder_rollups (Phase 4.5) ------------------
+
+def test_large_files_returns_items(sent, tmp_path):
+    """large_files returns big files by size after a scan."""
+    target = tmp_path / "target"
+    target.mkdir()
+    big = target / "big.bin"
+    big.write_bytes(b"\0" * (200 * 1024 * 1024))
+
+    main.handle_scan("r1", {"path": str(target)})
+    main.handle_large_files("r2", {})
+
+    terminal = sent[-1]
+    assert terminal["type"] == "result"
+    assert "items" in terminal["data"]
+    assert any(i["filepath"].endswith("big.bin") for i in terminal["data"]["items"])
+
+
+def test_folder_rollups_returns_folders(sent, tmp_path):
+    """folder_rollups returns directory cohorts after a scan."""
+    target = tmp_path / "target"
+    (target / "sub").mkdir(parents=True)
+    (target / "sub" / "big.bin").write_bytes(b"\0" * (200 * 1024 * 1024))
+
+    main.handle_scan("r1", {"path": str(target)})
+    main.handle_folder_rollups("r2", {})
+
+    terminal = sent[-1]
+    assert terminal["type"] == "result"
+    assert "folders" in terminal["data"]
+    # the 'sub' cohort should be present with the big file's bytes
+    assert any(f["path"].endswith("/sub") for f in terminal["data"]["folders"])
