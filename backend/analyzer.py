@@ -288,6 +288,38 @@ def disk_history(conn: sqlite3.Connection, *, limit: int | None = None) -> list[
     return results
 
 
+def goal_progress(conn: sqlite3.Connection, goal: dict, *, now: int | None = None) -> dict:
+    """Compute live progress for one goal. Progress is derived, never stored.
+
+    All three goal kinds are views over the footprint (DESIGN.md §4/§5):
+      - free_amount: bytes reclaimed since the goal was created, vs target.
+      - stay_above:  current free space vs threshold.
+      - triage:      how many flagged paths are still undecided.
+
+    `goal` is a row dict from database.list_goals (kind, target_bytes,
+    threshold_bytes, created_at, ...). Returns a dict the UI can render, e.g.
+    {kind, current, target, percent, done, label}.
+
+    TODO:
+      - free_amount:
+          SELECT COALESCE(SUM(size_bytes), 0) FROM actions
+          WHERE status = 'done' AND created_at >= goal.created_at
+          -> current; done = current >= target_bytes; percent = current/target.
+          (This is why actions.size_bytes matters — reclaimed bytes are the
+          progress signal. Trash and offload both count.)
+      - stay_above:
+          current = latest scans.disk_free_bytes (reuse disk_history/get_latest);
+          done = current >= threshold_bytes.
+      - triage:
+          current = count of triage rows still 'undecided'; done = 0 remaining.
+      - Reuse _human_size for any *_human labels. Guard divide-by-zero on percent.
+    Design note: keep this pure/read-only and computed on demand — never persist
+    a progress number that can drift from the underlying footprint.
+    """
+    # TODO: implement
+    raise NotImplementedError
+
+
 def _human_size(size_bytes: int) -> str:
     """Format a byte count as a short human string (e.g. 4509715660 -> "4.2 GB")."""
 

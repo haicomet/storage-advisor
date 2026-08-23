@@ -78,3 +78,42 @@ export interface FolderRollup {
   total_human: string; // e.g. "22 GB"
   file_count: number;
 }
+
+// --- Phase 5: footprint / goals ---------------------------------------------
+
+// The user's decision on a path (file or folder cohort). Mirrors the triage table.
+export type TriageDecision = "keep" | "delete" | "offload" | "undecided";
+
+export interface TriageItem {
+  path: string;
+  is_dir: boolean;
+  decision: TriageDecision;
+  decided_at: number; // epoch seconds
+}
+
+export type GoalKind = "free_amount" | "stay_above" | "triage";
+
+// A goal row (config only — progress is computed, see GoalProgress).
+export interface Goal {
+  id: number;
+  kind: GoalKind;
+  target_bytes: number | null; // for free_amount
+  threshold_bytes: number | null; // for stay_above
+  created_at: number;
+  status: "active" | "achieved" | "abandoned";
+}
+
+// Computed progress for a goal (analyzer.goal_progress). Never persisted.
+export interface GoalProgress {
+  kind: GoalKind;
+  current: number;
+  target: number | null;
+  percent: number; // 0–100
+  done: boolean;
+  label: string; // human summary, e.g. "12 GB of 20 GB freed"
+}
+
+// A goal with its computed progress attached (what list_goals returns).
+export interface GoalWithProgress extends Goal {
+  progress: GoalProgress;
+}

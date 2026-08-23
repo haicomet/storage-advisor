@@ -71,6 +71,125 @@ def init_db() -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_files_size ON files(size_bytes)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_files_last_mod ON files(last_modified)")
 
+        # --- Phase 5: the footprint (persists across sessions) ---------------
+        # `actions` is the permanent log of what the app did to the user's files
+        # AND the undo record. Never pruned. `path` may be a file OR a folder
+        # (is_dir), because triage/offload act on folder cohorts (DESIGN.md §4).
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS actions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                kind TEXT NOT NULL,              -- 'trash' | 'offload'
+                path TEXT NOT NULL,
+                is_dir INTEGER NOT NULL,         -- 0 file, 1 directory (cohort)
+                dest_path TEXT,                  -- offload destination (NULL for trash)
+                size_bytes INTEGER,
+                inode INTEGER,
+                status TEXT NOT NULL,            -- 'pending' | 'done' | 'failed' | 'undone'
+                created_at INTEGER NOT NULL,
+                completed_at INTEGER,
+                undo_token TEXT
+            )
+        """)
+
+        # Persistent per-path keep/delete/offload decisions the user makes over
+        # time. `path` may be a directory (a cohort). One row per path (latest
+        # decision wins — upsert on path).
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS triage (
+                path TEXT PRIMARY KEY,
+                is_dir INTEGER NOT NULL,
+                decision TEXT NOT NULL,          -- 'keep' | 'delete' | 'offload' | 'undecided'
+                decided_at INTEGER NOT NULL
+            )
+        """)
+
+        # A goal the user is working toward. Progress is COMPUTED (analyzer),
+        # not stored — these rows just hold the target/config.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS goals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                kind TEXT NOT NULL,              -- 'free_amount' | 'stay_above' | 'triage'
+                target_bytes INTEGER,            -- for free_amount
+                threshold_bytes INTEGER,         -- for stay_above
+                created_at INTEGER NOT NULL,
+                status TEXT NOT NULL             -- 'active' | 'achieved' | 'abandoned'
+            )
+        """)
+
+
+def record_action(kind: str, path: str, is_dir: bool, *, dest_path: str | None = None,
+                   size_bytes: int | None = None, inode: int | None = None,
+                   created_at: int) -> int:
+    """Insert a new action row (status='pending') and return its id.
+
+    Called by the safe-action framework (Phase 6) BEFORE touching the filesystem
+    — the row exists first so an interrupted action is always recoverable. Only
+    the insert lives here; status transitions use complete_action().
+
+    TODO:
+      - INSERT INTO actions (kind, path, is_dir, dest_path, size_bytes, inode,
+        status, created_at) VALUES (..., 'pending', ...); return lastrowid.
+    """
+    # TODO: implement
+    raise NotImplementedError
+
+
+def complete_action(action_id: int, *, status: str, completed_at: int,
+                    undo_token: str | None = None) -> None:
+    """Mark an action done/failed/undone and record its undo token.
+
+    TODO:
+      - UPDATE actions SET status=?, completed_at=?, undo_token=? WHERE id=?.
+    """
+    # TODO: implement
+    raise NotImplementedError
+
+
+def set_triage(path: str, is_dir: bool, decision: str, decided_at: int) -> None:
+    """Upsert the user's keep/delete/offload decision for one path.
+
+    TODO:
+      - INSERT INTO triage (...) VALUES (...) ON CONFLICT(path) DO UPDATE SET
+        decision=excluded.decision, decided_at=excluded.decided_at, is_dir=...
+      - Latest decision for a path wins (one row per path).
+    """
+    # TODO: implement
+    raise NotImplementedError
+
+
+def list_triage(decision: str | None = None) -> list[dict]:
+    """Return triage rows, optionally filtered to one decision (e.g. 'undecided').
+
+    TODO:
+      - SELECT * FROM triage [WHERE decision = ?] ORDER BY decided_at DESC.
+      - Return list of dicts.
+    """
+    # TODO: implement
+    raise NotImplementedError
+
+
+def create_goal(kind: str, *, target_bytes: int | None = None,
+                threshold_bytes: int | None = None, created_at: int) -> int:
+    """Insert a new goal (status='active') and return its id.
+
+    TODO:
+      - INSERT INTO goals (kind, target_bytes, threshold_bytes, created_at,
+        status) VALUES (..., 'active'); return lastrowid.
+    """
+    # TODO: implement
+    raise NotImplementedError
+
+
+def list_goals(status: str | None = None) -> list[dict]:
+    """Return goal rows, optionally filtered by status (e.g. 'active').
+
+    TODO:
+      - SELECT * FROM goals [WHERE status = ?] ORDER BY created_at DESC.
+      - Progress is NOT stored here — analyzer.goal_progress computes it per goal.
+    """
+    # TODO: implement
+    raise NotImplementedError
+
 
 def create_scan(root_path: str, started_at: int) -> int:
     # Insert a new scan row (status='running') and return its id.

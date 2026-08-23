@@ -177,6 +177,38 @@ async fn folder_rollups(limit: Option<u32>, min_size_bytes: Option<u64>, state: 
     )
 }
 
+// --- Phase 5: footprint / goals ---------------------------------------------
+
+#[tauri::command]
+async fn set_triage(path: String, is_dir: bool, decision: String, state: State<'_, SidecarState>) -> Result<Value, String> {
+    // Record a keep/delete/offload decision (not a filesystem action — Phase 6).
+    send_request(
+        "set_triage",
+        json!({ "path": path, "is_dir": is_dir, "decision": decision }),
+        state,
+    )
+}
+
+#[tauri::command]
+async fn list_triage(decision: Option<String>, state: State<'_, SidecarState>) -> Result<Value, String> {
+    send_request("list_triage", json!({ "decision": decision }), state)
+}
+
+#[tauri::command]
+async fn create_goal(kind: String, target_bytes: Option<u64>, threshold_bytes: Option<u64>, state: State<'_, SidecarState>) -> Result<Value, String> {
+    send_request(
+        "create_goal",
+        json!({ "kind": kind, "target_bytes": target_bytes, "threshold_bytes": threshold_bytes }),
+        state,
+    )
+}
+
+#[tauri::command]
+async fn list_goals(status: Option<String>, state: State<'_, SidecarState>) -> Result<Value, String> {
+    // Returns goals with computed progress.
+    send_request("list_goals", json!({ "status": status }), state)
+}
+
 #[tauri::command]
 fn reveal_in_finder(filepath: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
@@ -220,6 +252,10 @@ pub fn run() {
             get_disk_status,
             large_files,
             folder_rollups,
+            set_triage,
+            list_triage,
+            create_goal,
+            list_goals,
             reveal_in_finder
         ])
         .run(tauri::generate_context!())

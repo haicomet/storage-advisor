@@ -13,8 +13,9 @@ import ResultsTable from "./components/ResultsTable";
 import TrendsView from "./components/TrendsView";
 import DiskStatusBar from "./components/DiskStatusBar";
 import OffloadCandidatesView from "./components/OffloadCandidatesView";
-import { topLargeStale, getDiskHistory, getDiskStatus, getLargeFiles, getFolderRollups } from "./api";
-import type { FileRow, ScanResult, DiskHistoryPoint, DiskStatus, LargeFile, FolderRollup } from "./types";
+import GoalsView from "./components/GoalsView";
+import { topLargeStale, getDiskHistory, getDiskStatus, getLargeFiles, getFolderRollups, listGoals, createGoal } from "./api";
+import type { FileRow, ScanResult, DiskHistoryPoint, DiskStatus, LargeFile, FolderRollup, GoalWithProgress, GoalKind } from "./types";
 import "./App.css";
 
 function App() {
@@ -23,6 +24,8 @@ function App() {
   const [diskStatus, setDiskStatus] = useState<DiskStatus | null>(null);
   const [largeFiles, setLargeFiles] = useState<LargeFile[]>([]);
   const [folders, setFolders] = useState<FolderRollup[]>([]);
+  // Phase 5: goals (footprint). Progress is computed backend-side per goal.
+  const [goals, setGoals] = useState<GoalWithProgress[]>([]);
   const [hasScanned, setHasScanned] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -38,10 +41,32 @@ function App() {
     // Load free-space history on mount if it exists
     getDiskHistory().then(setTrends).catch(console.error);
 
+    // Load goals + progress on mount (footprint persists across sessions)
+    refreshGoals();
+
     // Keep the monitor alive by polling every 10 seconds
     const intervalId = setInterval(refreshDiskStatus, 10000);
     return () => clearInterval(intervalId);
   }, []);
+
+  async function refreshGoals() {
+    // Loads active goals with computed progress. Safe to call anytime; the
+    // listGoals api wrapper is still a stub, so guard against its throw for now.
+    try {
+      setGoals(await listGoals("active"));
+    } catch (err) {
+      console.error("Failed to load goals", err);
+    }
+  }
+
+  async function handleCreateGoal(kind: GoalKind, opts?: { targetBytes?: number; thresholdBytes?: number }) {
+    try {
+      await createGoal(kind, opts);
+      await refreshGoals();
+    } catch (err) {
+      console.error("Failed to create goal", err);
+    }
+  }
 
   async function refreshDiskStatus() {
     try {
@@ -83,6 +108,9 @@ function App() {
       <DiskStatusBar status={diskStatus} />
 
       {error && <div className="error-banner">Error fetching results: {error}</div>}
+
+      {/* Goals / footprint — Phase 5 */}
+      <GoalsView goals={goals} onCreateGoal={handleCreateGoal} />
 
       <ScanView onScanComplete={handleScanComplete} />
       <TrendsView points={trends} />

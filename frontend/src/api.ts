@@ -9,7 +9,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { FileRow, ScanProgress, ScanResult, TrendPoint, DiskStatus, DiskHistoryPoint, LargeFile, FolderRollup } from "./types";
+import type { FileRow, ScanProgress, ScanResult, TrendPoint, DiskStatus, DiskHistoryPoint, LargeFile, FolderRollup, TriageItem, TriageDecision, GoalKind, GoalWithProgress } from "./types";
 
 /**
  * Start a scan, receiving streamed progress via `onProgress`.
@@ -95,4 +95,53 @@ export async function getDiskHistory(): Promise<DiskHistoryPoint[]> {
  */
 export async function getDiskStatus(): Promise<DiskStatus> {
   return await invoke<DiskStatus>("get_disk_status");
+}
+
+// --- Phase 5: footprint / goals ---------------------------------------------
+
+/**
+ * Record a keep/delete/offload decision for a path (file or folder cohort).
+ * NOT a filesystem action — only records intent (the actual move is Phase 6).
+ *
+ * TODO:
+ *   - invoke("set_triage", { path, isDir, decision }). Note Tauri maps camelCase
+ *     `isDir` -> Rust `is_dir`.
+ */
+export async function setTriage(_path: string, _isDir: boolean, _decision: TriageDecision): Promise<void> {
+  // TODO: implement
+  throw new Error("not implemented");
+}
+
+/**
+ * List triage decisions, optionally filtered (e.g. "undecided").
+ *
+ * TODO:
+ *   - invoke<{ items: TriageItem[] }>("list_triage", { decision }) -> items.
+ */
+export async function listTriage(_decision?: TriageDecision): Promise<TriageItem[]> {
+  // TODO: implement
+  throw new Error("not implemented");
+}
+
+/**
+ * Create a goal. Pass targetBytes for free_amount, thresholdBytes for stay_above.
+ *
+ * TODO:
+ *   - invoke<{ goal_id: number }>("create_goal", { kind, targetBytes, thresholdBytes })
+ *     and return goal_id.
+ */
+export async function createGoal(_kind: GoalKind, _opts?: { targetBytes?: number; thresholdBytes?: number }): Promise<number> {
+  // TODO: implement
+  throw new Error("not implemented");
+}
+
+/**
+ * List goals with their computed progress.
+ *
+ * TODO:
+ *   - invoke<{ goals: GoalWithProgress[] }>("list_goals", { status }) -> goals.
+ */
+export async function listGoals(_status?: string): Promise<GoalWithProgress[]> {
+  // TODO: implement
+  throw new Error("not implemented");
 }

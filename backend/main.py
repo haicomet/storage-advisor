@@ -313,6 +313,62 @@ def handle_disk_status(req_id: str, args: dict) -> None:
         })
 
 
+def handle_set_triage(req_id: str, args: dict) -> None:
+    """Record a keep/delete/offload decision for a path (file or folder cohort).
+
+    Emits one {type:"result", data:{ok: true}}.
+
+    TODO:
+      - Read path, is_dir, decision from args; validate decision is one of
+        keep/delete/offload/undecided (else INVALID_ARGS).
+      - database.set_triage(path, is_dir, decision, decided_at=int(time.time())).
+      - This is a WRITE — but not a filesystem action (that's Phase 6). It only
+        records intent, so it's safe and non-destructive here.
+    """
+    # TODO: implement
+    raise NotImplementedError
+
+
+def handle_list_triage(req_id: str, args: dict) -> None:
+    """Return triage decisions, optionally filtered (e.g. decision='undecided').
+
+    Emits one {type:"result", data:{items: [...]}}.
+
+    TODO:
+      - database.list_triage(args.get("decision")); send under items.
+    """
+    # TODO: implement
+    raise NotImplementedError
+
+
+def handle_create_goal(req_id: str, args: dict) -> None:
+    """Create a goal (free_amount / stay_above / triage).
+
+    Emits one {type:"result", data:{goal_id: int}}.
+
+    TODO:
+      - Read kind + target_bytes/threshold_bytes from args; validate kind.
+      - database.create_goal(...); return the new id.
+    """
+    # TODO: implement
+    raise NotImplementedError
+
+
+def handle_list_goals(req_id: str, args: dict) -> None:
+    """Return goals with computed progress.
+
+    Emits one {type:"result", data:{goals: [{...goal, progress}]}}.
+
+    TODO:
+      - database.list_goals(args.get("status", "active")).
+      - For each goal, attach analyzer.goal_progress(conn, goal). Open ONE
+        connection and reuse it for the progress calls.
+      - Mirror the other query handlers' try/except with QUERY_ERROR.
+    """
+    # TODO: implement
+    raise NotImplementedError
+
+
 # Maps a protocol `cmd` string to its handler.
 COMMANDS = {
     "scan": handle_scan,
@@ -322,6 +378,10 @@ COMMANDS = {
     "trends": handle_trends,
     "disk_history": handle_disk_history,
     "disk_status": handle_disk_status,
+    "set_triage": handle_set_triage,
+    "list_triage": handle_list_triage,
+    "create_goal": handle_create_goal,
+    "list_goals": handle_list_goals,
 }
 
 
