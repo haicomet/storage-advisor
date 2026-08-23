@@ -95,8 +95,9 @@ def handle_scan(req_id: str, args: dict) -> None:
                 "scan_id": scan_id,
                 "files_seen": files_seen,
                 "duration_ms": duration_ms,
-                "total_bytes": total_bytes
-                # TODO: add disk_free_bytes / disk_total_bytes here
+                "total_bytes": total_bytes,
+                "disk_free_bytes": free_bytes,
+                "disk_total_bytes": disk_total
             }
         })
         log(f"[scan] Complete. Took {duration_ms}ms")

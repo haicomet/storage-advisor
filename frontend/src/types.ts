@@ -26,6 +26,8 @@ export interface ScanResult {
   scan_id: number;
   files_seen: number;
   duration_ms: number;
+  disk_free_bytes: number; // volume snapshot at scan time
+  disk_total_bytes: number;
 }
 
 export interface ProtocolError {

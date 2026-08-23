@@ -22,12 +22,14 @@ def _fresh_db(tmp_path, monkeypatch):
     database.init_db()
 
 
-def _seed_scan(files, *, status="complete", started_at=1_600_000_000):
+def _seed_scan(files, *, status="complete", started_at=1_600_000_000,
+               disk_free_bytes=None, disk_total_bytes=None):
     """Create one scan, insert `files`, mark it complete; return its scan_id.
 
     `files` is a list of (filepath, size_bytes, last_modified) triples; the
     remaining columns (atime, is_symlink, inode) are filled with harmless
-    defaults since the analyzer doesn't read them.
+    defaults since the analyzer doesn't read them. Pass disk_* to exercise the
+    free-space history query.
     """
     scan_id = database.create_scan("/Users/demo", started_at)
     batch = [
@@ -35,7 +37,10 @@ def _seed_scan(files, *, status="complete", started_at=1_600_000_000):
         for i, (path, size, mtime) in enumerate(files)
     ]
     database.insert_file_batch(scan_id, batch)
-    database.finish_scan(scan_id, started_at + 1, sum(f[1] for f in files), status=status)
+    database.finish_scan(
+        scan_id, started_at + 1, sum(f[1] for f in files), status=status,
+        disk_free_bytes=disk_free_bytes, disk_total_bytes=disk_total_bytes,
+    )
     return scan_id
 
 
@@ -158,28 +163,166 @@ def test_top_large_stale_rows_match_protocol_shape(tmp_path, monkeypatch):
 def test_trends_empty_when_no_scans(tmp_path, monkeypatch):
     """No completed scans -> [] so the UI shows an empty state, not a broken chart."""
     _fresh_db(tmp_path, monkeypatch)
-    # TODO: open a connection, call analyzer.scan_trends(conn), assert == []
-    raise NotImplementedError
+    with database.get_db_connection() as conn:
+        assert analyzer.scan_trends(conn) == []
 
 
 def test_trends_ordered_oldest_to_newest(tmp_path, monkeypatch):
     """Points come back ascending by started_at, with the right total_bytes each."""
-    # TODO: _seed_scan three times with distinct started_at (e.g. 1000/2000/3000)
-    #   and distinct total sizes; call scan_trends; assert the returned started_at
-    #   sequence is strictly increasing and total_bytes matches what was seeded.
-    raise NotImplementedError
+    _fresh_db(tmp_path, monkeypatch)
+    # Seed out of chronological order to prove the query sorts, not insert order.
+    _seed_scan([("/b", 2000, 1)], started_at=2000)
+    _seed_scan([("/a", 1000, 1)], started_at=1000)
+    _seed_scan([("/c", 3000, 1)], started_at=3000)
+    with database.get_db_connection() as conn:
+        points = analyzer.scan_trends(conn)
+    assert [p["started_at"] for p in points] == [1000, 2000, 3000]
+    assert [p["total_bytes"] for p in points] == [1000, 2000, 3000]
 
 
 def test_trends_excludes_incomplete_scans(tmp_path, monkeypatch):
     """running/failed scans (partial totals) must NOT appear as trend points."""
-    # TODO: seed one status="complete" scan and one status="running" (or
-    #   "failed: ..."); assert only the complete one is in the result. Mirrors
-    #   test_latest_scan_id_ignores_incomplete.
-    raise NotImplementedError
+    _fresh_db(tmp_path, monkeypatch)
+    _seed_scan([("/a", 1000, 1)], status="complete", started_at=1000)
+    _seed_scan([("/b", 500, 1)], status="running", started_at=2000)
+    _seed_scan([("/c", 700, 1)], status="failed: boom", started_at=3000)
+    with database.get_db_connection() as conn:
+        points = analyzer.scan_trends(conn)
+    assert [p["started_at"] for p in points] == [1000]
 
 
 def test_trends_rows_match_shape(tmp_path, monkeypatch):
     """Each point carries exactly the fields the chart/types.ts expect."""
-    # TODO: seed one complete scan; assert set(point) ==
-    #   {"scan_id", "started_at", "total_bytes", "total_human"}
-    raise NotImplementedError
+    _fresh_db(tmp_path, monkeypatch)
+    _seed_scan([("/a", 1000, 1)], started_at=1000)
+    with database.get_db_connection() as conn:
+        point = analyzer.scan_trends(conn)[0]
+    assert set(point) == {"scan_id", "started_at", "total_bytes", "total_human"}
+
+
+# --- disk_history (Phase 4) --------------------------------------------------
+
+def test_disk_history_empty_when_no_scans(tmp_path, monkeypatch):
+    """No scans with disk data -> []."""
+    _fresh_db(tmp_path, monkeypatch)
+    with database.get_db_connection() as conn:
+        assert analyzer.disk_history(conn) == []
+
+
+def test_disk_history_skips_scans_without_disk_data(tmp_path, monkeypatch):
+    """Pre-Phase-4 scans (disk_free_bytes NULL) must not appear as false dips."""
+    _fresh_db(tmp_path, monkeypatch)
+    _seed_scan([("/a", 100, 1)], started_at=1000)  # no disk_* -> NULL
+    _seed_scan([("/b", 100, 1)], started_at=2000,
+               disk_free_bytes=500, disk_total_bytes=1000)
+    with database.get_db_connection() as conn:
+        points = analyzer.disk_history(conn)
+    assert [p["started_at"] for p in points] == [2000]
+    assert points[0]["disk_free_bytes"] == 500
+
+
+def test_disk_history_ordered_and_shaped(tmp_path, monkeypatch):
+    """Points ascend by time and carry exactly the DiskHistoryPoint fields."""
+    _fresh_db(tmp_path, monkeypatch)
+    _seed_scan([("/a", 100, 1)], started_at=2000,
+               disk_free_bytes=400, disk_total_bytes=1000)
+    _seed_scan([("/b", 100, 1)], started_at=1000,
+               disk_free_bytes=600, disk_total_bytes=1000)
+    with database.get_db_connection() as conn:
+        points = analyzer.disk_history(conn)
+    assert [p["started_at"] for p in points] == [1000, 2000]
+    assert set(points[0]) == {
+        "scan_id", "started_at", "disk_free_bytes", "disk_total_bytes", "free_human",
+    }
+
+
+# --- large_files (Phase 4.5) -------------------------------------------------
+
+def test_large_files_empty_when_no_scans(tmp_path, monkeypatch):
+    """No scans -> [] (empty state, not an error)."""
+    _fresh_db(tmp_path, monkeypatch)
+    with database.get_db_connection() as conn:
+        assert analyzer.large_files(conn) == []
+
+
+def test_large_files_ranked_by_size_no_staleness(tmp_path, monkeypatch):
+    """Ranked by size DESC, and RECENT files are included (offload != delete)."""
+    _fresh_db(tmp_path, monkeypatch)
+    big = 200 * 1024 * 1024
+    bigger = 500 * 1024 * 1024
+    small = 1024
+    recent = 2_000_000_000  # fresh mtime — would be excluded by top_large_stale
+    _seed_scan([
+        ("/big", big, recent),
+        ("/bigger", bigger, recent),
+        ("/small", small, recent),
+    ])
+    with database.get_db_connection() as conn:
+        rows = analyzer.large_files(conn)
+    # small is below the 100 MB default; big/bigger present, largest first.
+    assert [r["filepath"] for r in rows] == ["/bigger", "/big"]
+
+
+def test_large_files_rows_match_shape(tmp_path, monkeypatch):
+    """Each row carries exactly {filepath, size_bytes, size_human} — no evidence."""
+    _fresh_db(tmp_path, monkeypatch)
+    _seed_scan([("/big", 300 * 1024 * 1024, 1)])
+    with database.get_db_connection() as conn:
+        row = analyzer.large_files(conn)[0]
+    assert set(row) == {"filepath", "size_bytes", "size_human"}
+
+
+def test_large_files_respects_limit(tmp_path, monkeypatch):
+    """`limit` caps the number of rows."""
+    _fresh_db(tmp_path, monkeypatch)
+    big = 200 * 1024 * 1024
+    _seed_scan([(f"/f{i}", big + i, 1) for i in range(5)])
+    with database.get_db_connection() as conn:
+        rows = analyzer.large_files(conn, limit=2)
+    assert len(rows) == 2
+
+
+# --- folder_rollups (Phase 4.5) ----------------------------------------------
+
+def test_folder_rollups_sums_recursively(tmp_path, monkeypatch):
+    """A folder's size is its whole subtree: School = Fall2024 + Spring2025."""
+    _fresh_db(tmp_path, monkeypatch)
+    mb = 1024 * 1024
+    _seed_scan([
+        ("/root/School/Fall2024/a.mp4", 200 * mb, 1),
+        ("/root/School/Spring2025/b.pdf", 150 * mb, 1),
+        ("/root/Movies/c.mkv", 300 * mb, 1),
+    ])
+    with database.get_db_connection() as conn:
+        rollups = {r["path"]: r for r in analyzer.folder_rollups(conn, min_size_bytes=0)}
+    # School rolls up both semesters; Movies is just its one file.
+    assert rollups["/root/School"]["total_bytes"] == 350 * mb
+    assert rollups["/root/School"]["file_count"] == 2
+    assert rollups["/root/Movies"]["total_bytes"] == 300 * mb
+    # Deepest leaf carries only its own file.
+    assert rollups["/root/School/Fall2024"]["total_bytes"] == 200 * mb
+
+
+def test_folder_rollups_ranked_and_filtered(tmp_path, monkeypatch):
+    """Ranked by total size DESC; folders below min_size_bytes are dropped."""
+    _fresh_db(tmp_path, monkeypatch)
+    mb = 1024 * 1024
+    _seed_scan([
+        ("/root/Big/x", 300 * mb, 1),
+        ("/root/Small/y", 1 * mb, 1),
+    ])
+    with database.get_db_connection() as conn:
+        rollups = analyzer.folder_rollups(conn, min_size_bytes=100 * mb)
+    paths = [r["path"] for r in rollups]
+    assert "/root/Small" not in paths          # filtered out (too small)
+    assert paths[0] == "/root/Big" or paths[0] == "/root"  # biggest ranked first
+    assert rollups == sorted(rollups, key=lambda r: r["total_bytes"], reverse=True)
+
+
+def test_folder_rollups_rows_match_shape(tmp_path, monkeypatch):
+    """Each rollup carries exactly the FolderRollup fields."""
+    _fresh_db(tmp_path, monkeypatch)
+    _seed_scan([("/root/A/f", 300 * 1024 * 1024, 1)])
+    with database.get_db_connection() as conn:
+        row = analyzer.folder_rollups(conn, min_size_bytes=0)[0]
+    assert set(row) == {"path", "total_bytes", "total_human", "file_count"}
