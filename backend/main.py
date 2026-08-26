@@ -316,58 +316,79 @@ def handle_disk_status(req_id: str, args: dict) -> None:
 
 def handle_set_triage(req_id: str, args: dict) -> None:
     """Record a keep/delete/offload decision for a path (file or folder cohort).
-
-    Emits one {type:"result", data:{ok: true}}.
-
-    TODO:
-      - Read path, is_dir, decision from args; validate decision is one of
-        keep/delete/offload/undecided (else INVALID_ARGS).
-      - database.set_triage(path, is_dir, decision, decided_at=int(time.time())).
-      - This is a WRITE — but not a filesystem action (that's Phase 6). It only
-        records intent, so it's safe and non-destructive here.
     """
-    # TODO: implement
-    raise NotImplementedError
+    path = args.get("path")
+    is_dir = args.get("is_dir", False)
+    decision = args.get("decision")
+
+    if decision not in ("keep", "delete", "offload", "undecided"):
+        send({"id": req_id, "type": "error", "error": {"code": "INVALID_ARGS", "message": f"Invalid decision: {decision}"}})
+        return
+
+    try:
+        database.set_triage(path, is_dir, decision, decided_at=(int(time.time())))
+        send({"id": req_id, "type": "result", "data": {"ok": True}})
+    except Exception as e:
+        log(f"[set_triage] Error: {e}")
+        send({"id": req_id, "type": "error", "error": {"code": "QUERY_ERROR", "message": str(e)}})
 
 
 def handle_list_triage(req_id: str, args: dict) -> None:
     """Return triage decisions, optionally filtered (e.g. decision='undecided').
-
-    Emits one {type:"result", data:{items: [...]}}.
-
-    TODO:
-      - database.list_triage(args.get("decision")); send under items.
     """
-    # TODO: implement
-    raise NotImplementedError
+    decision = args.get("decision")
+    
+    try:
+        items = database.list_triage(decision)
+        send({"id": req_id, "type": "result", "data": {"items": items}})
+    except Exception as e:
+        log(f"[list_triage] Error: {e}")
+        send({"id": req_id, "type": "error", "error": {"code": "QUERY_ERROR", "message": str(e)}})
 
 
 def handle_create_goal(req_id: str, args: dict) -> None:
     """Create a goal (free_amount / stay_above / triage).
-
-    Emits one {type:"result", data:{goal_id: int}}.
-
-    TODO:
-      - Read kind + target_bytes/threshold_bytes from args; validate kind.
-      - database.create_goal(...); return the new id.
     """
-    # TODO: implement
-    raise NotImplementedError
+    kind = args.get("kind")
+    target_bytes = args.get("target_bytes")
+    threshold_bytes = args.get("threshold_bytes")
+    
+    if kind not in ("free_amount", "stay_above", "triage"):
+        send({"id": req_id, "type": "error", "error": {"code": "INVALID_ARGS", "message": f"Invalid goal kind: {kind}"}})
+        return
+
+    try:
+        goal_id = database.create_goal(
+            kind, 
+            target_bytes=target_bytes, 
+            threshold_bytes=threshold_bytes, 
+            created_at=int(time.time())
+        )
+        send({"id": req_id, "type": "result", "data": {"goal_id": goal_id}})
+    except Exception as e:
+        log(f"[create_goal] Error: {e}")
+        send({"id": req_id, "type": "error", "error": {"code": "QUERY_ERROR", "message": str(e)}})
 
 
 def handle_list_goals(req_id: str, args: dict) -> None:
     """Return goals with computed progress.
-
-    Emits one {type:"result", data:{goals: [{...goal, progress}]}}.
-
-    TODO:
-      - database.list_goals(args.get("status", "active")).
-      - For each goal, attach analyzer.goal_progress(conn, goal). Open ONE
-        connection and reuse it for the progress calls.
-      - Mirror the other query handlers' try/except with QUERY_ERROR.
     """
-    # TODO: implement
-    raise NotImplementedError
+    status = args.get("status", "active")
+    
+    try:
+        with database.get_db_connection() as conn:
+            raw_goals = database.list_goals(status)
+            enriched_goals = []
+            
+            for goal in raw_goals:
+                progress = analyzer.goal_progress(conn, goal)
+                goal["progress"] = progress
+                enriched_goals.append(goal)
+                
+        send({"id": req_id, "type": "result", "data": {"goals": enriched_goals}})
+    except Exception as e:
+        log(f"[list_goals] Error: {e}")
+        send({"id": req_id, "type": "error", "error": {"code": "QUERY_ERROR", "message": str(e)}})
 
 
 # Maps a protocol `cmd` string to its handler.

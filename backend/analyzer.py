@@ -299,25 +299,56 @@ def goal_progress(conn: sqlite3.Connection, goal: dict, *, now: int | None = Non
     `goal` is a row dict from database.list_goals (kind, target_bytes,
     threshold_bytes, created_at, ...). Returns a dict the UI can render, e.g.
     {kind, current, target, percent, done, label}.
-
-    TODO:
-      - free_amount:
-          SELECT COALESCE(SUM(size_bytes), 0) FROM actions
-          WHERE status = 'done' AND created_at >= goal.created_at
-          -> current; done = current >= target_bytes; percent = current/target.
-          (This is why actions.size_bytes matters — reclaimed bytes are the
-          progress signal. Trash and offload both count.)
-      - stay_above:
-          current = latest scans.disk_free_bytes (reuse disk_history/get_latest);
-          done = current >= threshold_bytes.
-      - triage:
-          current = count of triage rows still 'undecided'; done = 0 remaining.
-      - Reuse _human_size for any *_human labels. Guard divide-by-zero on percent.
-    Design note: keep this pure/read-only and computed on demand — never persist
-    a progress number that can drift from the underlying footprint.
     """
-    # TODO: implement
-    raise NotImplementedError
+    if goal["kind"] == "free_amount":
+        cursor = conn.execute(
+            """SELECT COALESCE(SUM(size_bytes), 0) FROM actions 
+               WHERE status = 'done' AND created_at >= ?""",
+            (goal["created_at"],)
+        )
+        current = cursor.fetchone()[0]
+        target = goal["target_bytes"]
+        done = current >= target
+        percent = (current / target * 100) if target > 0 else 0
+        
+        return {
+            "kind": "free_amount",
+            "current": current,
+            "target": target,
+            "percent": percent,
+            "done": done,
+            "label": f"{_human_size(current)} / {_human_size(target)} freed"
+        }
+    elif goal["kind"] == "stay_above":
+        # Get the latest free space from the scans table
+        cursor = conn.execute(
+            "SELECT disk_free_bytes FROM scans WHERE status = 'complete' ORDER BY started_at DESC LIMIT 1"
+        )
+        row = cursor.fetchone()
+        current = row["disk_free_bytes"] if row and row["disk_free_bytes"] is not None else 0
+        target = goal["threshold_bytes"]
+        done = current >= target
+        
+        return {
+            "kind": "stay_above",
+            "current": current,
+            "target": target,
+            "done": done,
+            "label": f"Current: {_human_size(current)} (Target: {_human_size(target)})"
+        }
+    elif goal["kind"] == "triage":
+        cursor = conn.execute("SELECT COUNT(*) FROM triage WHERE decision = 'undecided'")
+        current = cursor.fetchone()[0]
+        done = current == 0
+        
+        return {
+            "kind": "triage",
+            "current": current,
+            "done": done,
+            "label": f"{current} paths left to triage"
+        }
+    else:
+        raise ValueError
 
 
 def _human_size(size_bytes: int) -> str:

@@ -121,74 +121,92 @@ def record_action(kind: str, path: str, is_dir: bool, *, dest_path: str | None =
                    size_bytes: int | None = None, inode: int | None = None,
                    created_at: int) -> int:
     """Insert a new action row (status='pending') and return its id.
-
-    Called by the safe-action framework (Phase 6) BEFORE touching the filesystem
-    — the row exists first so an interrupted action is always recoverable. Only
-    the insert lives here; status transitions use complete_action().
-
-    TODO:
-      - INSERT INTO actions (kind, path, is_dir, dest_path, size_bytes, inode,
-        status, created_at) VALUES (..., 'pending', ...); return lastrowid.
     """
-    # TODO: implement
-    raise NotImplementedError
+    with get_db_connection() as conn:
+            cursor = conn.execute(
+                "INSERT INTO actions (kind, path, is_dir, dest_path, size_bytes, inode, status, created_at)" \
+                " VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)",
+                (kind, path, 1 if is_dir else 0, dest_path, size_bytes, inode, created_at)
+            )
+            return cursor.lastrowid
 
 
 def complete_action(action_id: int, *, status: str, completed_at: int,
                     undo_token: str | None = None) -> None:
     """Mark an action done/failed/undone and record its undo token.
-
-    TODO:
-      - UPDATE actions SET status=?, completed_at=?, undo_token=? WHERE id=?.
     """
-    # TODO: implement
-    raise NotImplementedError
+    with get_db_connection() as conn:
+        cursor = conn.execute(
+            "UPDATE actions SET status=?, completed_at=?, undo_token=? WHERE id=?",
+            (status, completed_at, undo_token, action_id)
+        )
+
 
 
 def set_triage(path: str, is_dir: bool, decision: str, decided_at: int) -> None:
     """Upsert the user's keep/delete/offload decision for one path.
-
-    TODO:
-      - INSERT INTO triage (...) VALUES (...) ON CONFLICT(path) DO UPDATE SET
-        decision=excluded.decision, decided_at=excluded.decided_at, is_dir=...
-      - Latest decision for a path wins (one row per path).
     """
-    # TODO: implement
-    raise NotImplementedError
+
+    with get_db_connection() as conn:
+        cursor = conn.execute(
+            """INSERT INTO triage (path, is_dir, decision, decided_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(path) DO UPDATE SET
+                    is_dir = excluded.is_dir,
+                    decision = excluded.decision,
+                    decided_at = excluded.decided_at
+            """,
+            (path, 1 if is_dir else 0, decision, decided_at)
+        )
 
 
 def list_triage(decision: str | None = None) -> list[dict]:
     """Return triage rows, optionally filtered to one decision (e.g. 'undecided').
-
-    TODO:
-      - SELECT * FROM triage [WHERE decision = ?] ORDER BY decided_at DESC.
-      - Return list of dicts.
     """
-    # TODO: implement
-    raise NotImplementedError
+    with get_db_connection() as conn:
+        if decision:
+            cursor = conn.execute(
+                "SELECT * FROM triage WHERE decision = ? ORDER BY decided_at DESC",
+                (decision,)
+            )
+        else:
+            cursor = conn.execute(
+                "SELECT * FROM triage ORDER BY decided_at DESC"
+            )
 
+        return [dict(row) for row in cursor]
 
 def create_goal(kind: str, *, target_bytes: int | None = None,
                 threshold_bytes: int | None = None, created_at: int) -> int:
     """Insert a new goal (status='active') and return its id.
-
-    TODO:
-      - INSERT INTO goals (kind, target_bytes, threshold_bytes, created_at,
-        status) VALUES (..., 'active'); return lastrowid.
     """
-    # TODO: implement
-    raise NotImplementedError
+    with get_db_connection() as conn:
+            cursor = conn.execute(
+                """INSERT INTO goals (kind, target_bytes, threshold_bytes, created_at,
+                    status)
+                    VALUES (?, ?, ?, ?, ?)
+                """,
+                (kind, target_bytes, threshold_bytes, created_at, 'active')
+            )
+
+            return cursor.lastrowid
 
 
 def list_goals(status: str | None = None) -> list[dict]:
     """Return goal rows, optionally filtered by status (e.g. 'active').
-
-    TODO:
-      - SELECT * FROM goals [WHERE status = ?] ORDER BY created_at DESC.
-      - Progress is NOT stored here — analyzer.goal_progress computes it per goal.
     """
-    # TODO: implement
-    raise NotImplementedError
+    with get_db_connection() as conn:
+            if status:
+                cursor = conn.execute(
+                    "SELECT * FROM goals WHERE status = ? ORDER BY created_at DESC",
+                    (status,)
+                )
+            else:
+                cursor = conn.execute(
+                    "SELECT * FROM goals ORDER BY created_at DESC"
+                )
+    
+            return [dict(row) for row in cursor]
 
 
 def create_scan(root_path: str, started_at: int) -> int:
