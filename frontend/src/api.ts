@@ -102,46 +102,38 @@ export async function getDiskStatus(): Promise<DiskStatus> {
 /**
  * Record a keep/delete/offload decision for a path (file or folder cohort).
  * NOT a filesystem action — only records intent (the actual move is Phase 6).
- *
- * TODO:
- *   - invoke("set_triage", { path, isDir, decision }). Note Tauri maps camelCase
- *     `isDir` -> Rust `is_dir`.
  */
-export async function setTriage(_path: string, _isDir: boolean, _decision: TriageDecision): Promise<void> {
-  // TODO: implement
-  throw new Error("not implemented");
+export async function setTriage(path: string, isDir: boolean, decision: TriageDecision): Promise<void> {
+  await invoke("set_triage", { path, isDir, decision });
 }
 
 /**
  * List triage decisions, optionally filtered (e.g. "undecided").
- *
- * TODO:
- *   - invoke<{ items: TriageItem[] }>("list_triage", { decision }) -> items.
  */
-export async function listTriage(_decision?: TriageDecision): Promise<TriageItem[]> {
-  // TODO: implement
-  throw new Error("not implemented");
+export async function listTriage(decision?: TriageDecision): Promise<TriageItem[]> {
+  const response = await invoke<{ items: TriageItem[] }>("list_triage", { decision });
+  return response.items.map(item => ({
+    ...item,
+    is_dir: Boolean(item.is_dir)
+  }));
 }
 
 /**
  * Create a goal. Pass targetBytes for free_amount, thresholdBytes for stay_above.
- *
- * TODO:
- *   - invoke<{ goal_id: number }>("create_goal", { kind, targetBytes, thresholdBytes })
- *     and return goal_id.
  */
-export async function createGoal(_kind: GoalKind, _opts?: { targetBytes?: number; thresholdBytes?: number }): Promise<number> {
-  // TODO: implement
-  throw new Error("not implemented");
+export async function createGoal(kind: GoalKind, opts?: { targetBytes?: number; thresholdBytes?: number }): Promise<number> {
+  const response = await invoke<{ goal_id: number }>("create_goal", {
+    kind,
+    targetBytes: opts?.targetBytes ?? null,
+    thresholdBytes: opts?.thresholdBytes ?? null
+  });
+  return response.goal_id
 }
 
 /**
  * List goals with their computed progress.
- *
- * TODO:
- *   - invoke<{ goals: GoalWithProgress[] }>("list_goals", { status }) -> goals.
  */
-export async function listGoals(_status?: string): Promise<GoalWithProgress[]> {
-  // TODO: implement
-  throw new Error("not implemented");
+export async function listGoals(status?: string): Promise<GoalWithProgress[]> {
+  const response = await invoke<{ goals: GoalWithProgress[] }>("list_goals", { status });
+  return response.goals;
 }
