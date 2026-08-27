@@ -326,3 +326,73 @@ def test_folder_rollups_rows_match_shape(tmp_path, monkeypatch):
     with database.get_db_connection() as conn:
         row = analyzer.folder_rollups(conn, min_size_bytes=0)[0]
     assert set(row) == {"path", "total_bytes", "total_human", "file_count"}
+
+
+# --- goal_progress (Phase 5) -------------------------------------------------
+
+def test_goal_progress_free_amount_counts_done_actions(tmp_path, monkeypatch):
+    """free_amount progress = bytes reclaimed by 'done' actions since goal created."""
+    _fresh_db(tmp_path, monkeypatch)
+    # A completed action worth 5 GB, created after the goal.
+    aid = database.record_action("trash", "/x", is_dir=False, size_bytes=5_000_000_000, created_at=1500)
+    database.complete_action(aid, status="done", completed_at=1600)
+    goal = {"kind": "free_amount", "target_bytes": 10_000_000_000, "created_at": 1000}
+    with database.get_db_connection() as conn:
+        p = analyzer.goal_progress(conn, goal)
+    assert p["current"] == 5_000_000_000
+    assert p["percent"] == 50.0
+    assert p["done"] is False
+
+
+def test_goal_progress_free_amount_ignores_pending_and_older(tmp_path, monkeypatch):
+    """Only 'done' actions created on/after the goal count toward progress."""
+    _fresh_db(tmp_path, monkeypatch)
+    # pending action — must not count
+    database.record_action("trash", "/p", is_dir=False, size_bytes=9_000_000_000, created_at=1500)
+    # done but BEFORE the goal was created — must not count
+    old = database.record_action("trash", "/o", is_dir=False, size_bytes=9_000_000_000, created_at=500)
+    database.complete_action(old, status="done", completed_at=600)
+    goal = {"kind": "free_amount", "target_bytes": 10_000_000_000, "created_at": 1000}
+    with database.get_db_connection() as conn:
+        p = analyzer.goal_progress(conn, goal)
+    assert p["current"] == 0
+
+
+def test_goal_progress_stay_above_reads_latest_free(tmp_path, monkeypatch):
+    """stay_above compares the latest scan's free space to the threshold."""
+    _fresh_db(tmp_path, monkeypatch)
+    _seed_scan([("/a", 1, 1)], started_at=1000, disk_free_bytes=30_000_000_000,
+               disk_total_bytes=100_000_000_000)
+    _seed_scan([("/b", 1, 1)], started_at=2000, disk_free_bytes=60_000_000_000,
+               disk_total_bytes=100_000_000_000)  # latest
+    goal = {"kind": "stay_above", "threshold_bytes": 50_000_000_000, "created_at": 1}
+    with database.get_db_connection() as conn:
+        p = analyzer.goal_progress(conn, goal)
+    assert p["current"] == 60_000_000_000
+    assert p["done"] is True
+
+
+def test_goal_progress_triage_counts_undecided(tmp_path, monkeypatch):
+    """triage progress = number of paths still undecided; done when zero."""
+    _fresh_db(tmp_path, monkeypatch)
+    database.set_triage("/a", is_dir=True, decision="undecided", decided_at=1)
+    database.set_triage("/b", is_dir=True, decision="keep", decided_at=2)
+    goal = {"kind": "triage", "created_at": 1}
+    with database.get_db_connection() as conn:
+        p = analyzer.goal_progress(conn, goal)
+    assert p["current"] == 1
+    assert p["done"] is False
+
+
+def test_goal_progress_all_kinds_have_percent(tmp_path, monkeypatch):
+    """Every kind returns a percent (the UI progress bar reads it for all)."""
+    _fresh_db(tmp_path, monkeypatch)
+    _seed_scan([("/a", 1, 1)], started_at=1000, disk_free_bytes=50, disk_total_bytes=100)
+    goals = [
+        {"kind": "free_amount", "target_bytes": 100, "created_at": 1},
+        {"kind": "stay_above", "threshold_bytes": 100, "created_at": 1},
+        {"kind": "triage", "created_at": 1},
+    ]
+    with database.get_db_connection() as conn:
+        for g in goals:
+            assert "percent" in analyzer.goal_progress(conn, g)
