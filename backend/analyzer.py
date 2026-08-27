@@ -328,24 +328,28 @@ def goal_progress(conn: sqlite3.Connection, goal: dict, *, now: int | None = Non
         current = row["disk_free_bytes"] if row and row["disk_free_bytes"] is not None else 0
         target = goal["threshold_bytes"]
         done = current >= target
+        percent = min(100.0, (current / target * 100)) if target > 0 else 100.0
         
         return {
             "kind": "stay_above",
             "current": current,
             "target": target,
             "done": done,
-            "label": f"Current: {_human_size(current)} (Target: {_human_size(target)})"
+            "label": f"Current: {_human_size(current)} (Target: {_human_size(target)})",
+            "percent": percent
         }
     elif goal["kind"] == "triage":
         cursor = conn.execute("SELECT COUNT(*) FROM triage WHERE decision = 'undecided'")
         current = cursor.fetchone()[0]
         done = current == 0
+        percent = 100.0 if done else 0.0
         
         return {
             "kind": "triage",
             "current": current,
             "done": done,
-            "label": f"{current} paths left to triage"
+            "label": f"{current} paths left to triage",
+            "percent": percent
         }
     else:
         raise ValueError
