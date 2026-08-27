@@ -119,3 +119,30 @@ export interface GoalProgress {
 export interface GoalWithProgress extends Goal {
   progress: GoalProgress;
 }
+
+// --- Phase 6: safe actions (the footprint log) ------------------------------
+
+export type ActionKind = "trash" | "offload";
+export type ActionStatus = "pending" | "done" | "failed" | "undone";
+
+// One row of the actions log — what the app did to a file/folder, and how to
+// undo it. Mirrors the actions table (DESIGN.md §4/§6). Never pruned.
+export interface Action {
+  id: number;
+  kind: ActionKind;
+  path: string;
+  is_dir: boolean;
+  dest_path: string | null; // offload destination (null for trash)
+  size_bytes: number | null;
+  status: ActionStatus;
+  created_at: number;
+  completed_at: number | null;
+  undo_token: string | null;
+}
+
+// What move_to_trash returns.
+export interface ActionResult {
+  action_id: number;
+  status: ActionStatus;
+  undo_token: string | null;
+}

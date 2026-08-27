@@ -9,7 +9,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { FileRow, ScanProgress, ScanResult, TrendPoint, DiskStatus, DiskHistoryPoint, LargeFile, FolderRollup, TriageItem, TriageDecision, GoalKind, GoalWithProgress } from "./types";
+import type { FileRow, ScanProgress, ScanResult, TrendPoint, DiskStatus, DiskHistoryPoint, LargeFile, FolderRollup, TriageItem, TriageDecision, GoalKind, GoalWithProgress, Action, ActionResult } from "./types";
 
 /**
  * Start a scan, receiving streamed progress via `onProgress`.
@@ -136,4 +136,25 @@ export async function createGoal(kind: GoalKind, opts?: { targetBytes?: number; 
 export async function listGoals(status?: string): Promise<GoalWithProgress[]> {
   const response = await invoke<{ goals: GoalWithProgress[] }>("list_goals", { status });
   return response.goals;
+}
+
+// --- Phase 6: safe actions (Move to Trash + undo) ---------------------------
+
+/**
+ * Move a file or folder cohort to the macOS Trash (reversible; never rm).
+ * Returns the recorded action (with an undo_token). Confirm in the UI first.
+ */
+export async function moveToTrash(path: string, isDir: boolean, sizeBytes?: number): Promise<ActionResult> {
+  return await invoke<ActionResult>("move_to_trash", { path, isDir, sizeBytes: sizeBytes ?? null });
+}
+
+/** Reverse a completed action (restore from Trash) by its id. */
+export async function undoAction(actionId: number): Promise<void> {
+  await invoke("undo_action", { actionId });
+}
+
+/** The footprint log — actions the app has taken, newest first. */
+export async function listActions(status?: string): Promise<Action[]> {
+  const response = await invoke<{ actions: Action[] }>("list_actions", { status });
+  return response.actions.map(a => ({ ...a, is_dir: Boolean(a.is_dir) }));
 }
