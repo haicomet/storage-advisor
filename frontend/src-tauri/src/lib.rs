@@ -209,6 +209,30 @@ async fn list_goals(status: Option<String>, state: State<'_, SidecarState>) -> R
     send_request("list_goals", json!({ "status": status }), state)
 }
 
+// --- Phase 6: safe actions (Move to Trash + undo) ---------------------------
+
+#[tauri::command]
+async fn move_to_trash(path: String, is_dir: bool, size_bytes: Option<u64>, state: State<'_, SidecarState>) -> Result<Value, String> {
+    // Reversible delete via the macOS Trash (never rm). Returns {action_id,
+    // status, undo_token}. The UI must confirm before invoking this.
+    send_request(
+        "move_to_trash",
+        json!({ "path": path, "is_dir": is_dir, "size_bytes": size_bytes }),
+        state,
+    )
+}
+
+#[tauri::command]
+async fn undo_action(action_id: u32, state: State<'_, SidecarState>) -> Result<Value, String> {
+    send_request("undo_action", json!({ "action_id": action_id }), state)
+}
+
+#[tauri::command]
+async fn list_actions(status: Option<String>, state: State<'_, SidecarState>) -> Result<Value, String> {
+    // The footprint log — what the app has done to the user's files.
+    send_request("list_actions", json!({ "status": status }), state)
+}
+
 #[tauri::command]
 fn reveal_in_finder(filepath: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
@@ -256,6 +280,9 @@ pub fn run() {
             list_triage,
             create_goal,
             list_goals,
+            move_to_trash,
+            undo_action,
+            list_actions,
             reveal_in_finder
         ])
         .run(tauri::generate_context!())

@@ -209,6 +209,30 @@ def list_goals(status: str | None = None) -> list[dict]:
             return [dict(row) for row in cursor]
 
 
+def list_actions(status: str | None = None) -> list[dict]:
+    """Return action rows (the footprint log), newest first.
+
+    Powers the footprint/undo view. Never pruned, so this is the full history of
+    what the app did to the user's files.
+
+    TODO:
+      - SELECT * FROM actions [WHERE status = ?] ORDER BY created_at DESC.
+      - Return list of dicts.
+    """
+    # TODO: implement
+    raise NotImplementedError
+
+
+def get_action(action_id: int) -> dict | None:
+    """Return one action row by id (for undo), or None if absent.
+
+    TODO:
+      - SELECT * FROM actions WHERE id = ?; return dict(row) or None.
+    """
+    # TODO: implement
+    raise NotImplementedError
+
+
 def create_scan(root_path: str, started_at: int) -> int:
     # Insert a new scan row (status='running') and return its id.
     with get_db_connection() as conn:

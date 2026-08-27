@@ -14,8 +14,9 @@ import TrendsView from "./components/TrendsView";
 import DiskStatusBar from "./components/DiskStatusBar";
 import OffloadCandidatesView from "./components/OffloadCandidatesView";
 import GoalsView from "./components/GoalsView";
-import { topLargeStale, getDiskHistory, getDiskStatus, getLargeFiles, getFolderRollups, listGoals, createGoal } from "./api";
-import type { FileRow, ScanResult, DiskHistoryPoint, DiskStatus, LargeFile, FolderRollup, GoalWithProgress, GoalKind } from "./types";
+import FootprintView from "./components/FootprintView";
+import { topLargeStale, getDiskHistory, getDiskStatus, getLargeFiles, getFolderRollups, listGoals, createGoal, listActions, undoAction } from "./api";
+import type { FileRow, ScanResult, DiskHistoryPoint, DiskStatus, LargeFile, FolderRollup, GoalWithProgress, GoalKind, Action } from "./types";
 import "./App.css";
 
 function App() {
@@ -26,6 +27,8 @@ function App() {
   const [folders, setFolders] = useState<FolderRollup[]>([]);
   // Phase 5: goals (footprint). Progress is computed backend-side per goal.
   const [goals, setGoals] = useState<GoalWithProgress[]>([]);
+  // Phase 6: the action log (Trash/offload history + undo).
+  const [actions, setActions] = useState<Action[]>([]);
   const [hasScanned, setHasScanned] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -43,6 +46,9 @@ function App() {
 
     // Load goals + progress on mount (footprint persists across sessions)
     refreshGoals();
+
+    // Load the action log on mount (Phase 6 footprint/undo)
+    refreshActions();
 
     // Keep the monitor alive by polling every 10 seconds
     const intervalId = setInterval(refreshDiskStatus, 10000);
@@ -65,6 +71,26 @@ function App() {
       await refreshGoals();
     } catch (err) {
       console.error("Failed to create goal", err);
+    }
+  }
+
+  async function refreshActions() {
+    // Loads the action log. Guarded — the backend list_actions is still a stub.
+    try {
+      setActions(await listActions());
+    } catch (err) {
+      console.error("Failed to load actions", err);
+    }
+  }
+
+  async function handleUndo(actionId: number) {
+    try {
+      await undoAction(actionId);
+      await refreshActions();
+      await refreshGoals();       // undo changes reclaimed bytes → goal progress
+      await refreshDiskStatus();  // and free space
+    } catch (err) {
+      console.error("Failed to undo action", err);
     }
   }
 
@@ -111,6 +137,9 @@ function App() {
 
       {/* Goals / footprint — Phase 5 */}
       <GoalsView goals={goals} onCreateGoal={handleCreateGoal} />
+
+      {/* Action log + undo — Phase 6 */}
+      <FootprintView actions={actions} onUndo={handleUndo} />
 
       <ScanView onScanComplete={handleScanComplete} />
       <TrendsView points={trends} />

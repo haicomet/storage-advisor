@@ -24,6 +24,7 @@ from . import database
 from . import scanner
 from . import analyzer
 from . import disk
+from . import actions
 
 # NOTE: keep imports package-relative so `python -m backend.main` works from the
 # repo root (same fix tracked for scan_cli). e.g. from .analyzer import ...
@@ -390,6 +391,51 @@ def handle_list_goals(req_id: str, args: dict) -> None:
         send({"id": req_id, "type": "error", "error": {"code": "QUERY_ERROR", "message": str(e)}})
 
 
+def handle_move_to_trash(req_id: str, args: dict) -> None:
+    """Handle a `move_to_trash` request: safely trash a file or folder cohort.
+
+    Emits one {type:"result", data:{action_id, status, undo_token}}.
+
+    TODO:
+      - Read path (required -> INVALID_ARGS if missing), is_dir, and optional
+        size_bytes from args.
+      - result = actions.perform_action("trash", path, is_dir, size_bytes=...)
+      - send the result dict. On failure send an error — map a
+        "unsupported platform" / permission failure to a clear code.
+      - This is the app's FIRST destructive action, but it's reversible (Trash),
+        and perform_action records it before touching disk. The UI must confirm
+        before calling this (advise-first stays the default).
+    """
+    # TODO: implement
+    raise NotImplementedError
+
+
+def handle_undo_action(req_id: str, args: dict) -> None:
+    """Handle an `undo_action` request: reverse a completed action.
+
+    Emits one {type:"result", data:{ok: true}}.
+
+    TODO:
+      - Read action_id (required). actions.undo_action(action_id).
+      - Error if the action isn't undoable (not 'done'); send a clear message.
+    """
+    # TODO: implement
+    raise NotImplementedError
+
+
+def handle_list_actions(req_id: str, args: dict) -> None:
+    """Handle a `list_actions` request: the footprint log (what the app did).
+
+    Emits one {type:"result", data:{actions: [...]}}.
+
+    TODO:
+      - database.list_actions(args.get("status")); send under `actions`.
+      - Mirror the other query handlers' try/except with QUERY_ERROR.
+    """
+    # TODO: implement
+    raise NotImplementedError
+
+
 # Maps a protocol `cmd` string to its handler.
 COMMANDS = {
     "scan": handle_scan,
@@ -403,6 +449,9 @@ COMMANDS = {
     "list_triage": handle_list_triage,
     "create_goal": handle_create_goal,
     "list_goals": handle_list_goals,
+    "move_to_trash": handle_move_to_trash,
+    "undo_action": handle_undo_action,
+    "list_actions": handle_list_actions,
 }
 
 
