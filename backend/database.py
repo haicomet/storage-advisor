@@ -136,7 +136,7 @@ def complete_action(action_id: int, *, status: str, completed_at: int,
     """Mark an action done/failed/undone and record its undo token.
     """
     with get_db_connection() as conn:
-        cursor = conn.execute(
+        conn.execute(
             "UPDATE actions SET status=?, completed_at=?, undo_token=? WHERE id=?",
             (status, completed_at, undo_token, action_id)
         )

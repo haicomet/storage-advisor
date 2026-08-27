@@ -49,7 +49,6 @@ def handle_scan(req_id: str, args: dict) -> None:
     target_path = disk.resolve_scan_target(args.get("path"))
 
     log(f"[scan] Starting scan of {target_path}")
-    database.init_db()
     started_at = int(time.time())
     scan_id = database.create_scan(target_path, started_at)
     total_bytes = 0
@@ -444,7 +443,9 @@ def dispatch(request: dict) -> None:
 def main() -> int:
     """Read stdin line by line, parse JSON, dispatch. Runs until stdin closes."""
     log("Storage Advisor Sidecar started. Waiting for requests...")
-    
+
+    database.init_db()
+
     # Loop over sys.stdin blockingly. Runs one request at a time.
     for line in sys.stdin:
         line = line.strip()
