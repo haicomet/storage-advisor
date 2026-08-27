@@ -16,8 +16,14 @@ from backend import database, main
 
 @pytest.fixture
 def sent(monkeypatch, tmp_path):
-    """Capture every message passed to main.send(); isolate the DB to tmp_path."""
+    """Capture every message passed to main.send(); isolate the DB to tmp_path.
+
+    init_db() mirrors what main() now does once at sidecar startup — these tests
+    call handlers directly (not via the stdio loop), so they must create the
+    schema themselves.
+    """
     monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "test.db"))
+    database.init_db()
     messages = []
     monkeypatch.setattr(main, "send", lambda msg: messages.append(msg))
     return messages
@@ -180,3 +186,55 @@ def test_folder_rollups_returns_folders(sent, tmp_path):
     assert "folders" in terminal["data"]
     # the 'sub' cohort should be present with the big file's bytes
     assert any(f["path"].endswith("/sub") for f in terminal["data"]["folders"])
+
+
+# --- Phase 5: triage / goals handlers ----------------------------------------
+
+def test_set_and_list_triage(sent):
+    """set_triage records a decision; list_triage returns it (no scan needed)."""
+    main.handle_set_triage("t1", {"path": "/Users/demo/School", "is_dir": True, "decision": "offload"})
+    assert sent[-1]["type"] == "result"
+
+    main.handle_list_triage("t2", {"decision": "offload"})
+    terminal = sent[-1]
+    assert terminal["type"] == "result"
+    assert any(r["path"] == "/Users/demo/School" for r in terminal["data"]["items"])
+
+
+def test_set_triage_rejects_bad_decision(sent):
+    """An unknown decision is INVALID_ARGS, not a silent write."""
+    main.handle_set_triage("t1", {"path": "/x", "is_dir": False, "decision": "banish"})
+    assert sent[-1]["type"] == "error"
+    assert sent[-1]["error"]["code"] == "INVALID_ARGS"
+
+
+def test_create_and_list_goals_with_progress(sent):
+    """create_goal then list_goals returns the goal with computed progress attached."""
+    main.handle_create_goal("g1", {"kind": "free_amount", "target_bytes": 20_000_000_000})
+    assert sent[-1]["type"] == "result"
+    assert sent[-1]["data"]["goal_id"] > 0
+
+    main.handle_list_goals("g2", {"status": "active"})
+    terminal = sent[-1]
+    assert terminal["type"] == "result"
+    goals = terminal["data"]["goals"]
+    assert len(goals) == 1
+    assert "progress" in goals[0]
+    assert goals[0]["progress"]["kind"] == "free_amount"
+
+
+def test_create_goal_rejects_bad_kind(sent):
+    """An unknown goal kind is INVALID_ARGS."""
+    main.handle_create_goal("g1", {"kind": "world_peace"})
+    assert sent[-1]["type"] == "error"
+    assert sent[-1]["error"]["code"] == "INVALID_ARGS"
+
+
+def test_list_goals_works_on_fresh_db(sent):
+    """Regression: goals commands must work before any scan (init_db in the loop).
+
+    The `sent` fixture init_db's the schema the same way main() does at startup,
+    so list_goals returns an empty list rather than 'no such table'."""
+    main.handle_list_goals("g1", {"status": "active"})
+    assert sent[-1]["type"] == "result"
+    assert sent[-1]["data"]["goals"] == []
