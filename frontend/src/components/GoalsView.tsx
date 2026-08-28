@@ -20,14 +20,6 @@ interface GoalsViewProps {
 }
 
 export default function GoalsView({ goals, onCreateGoal: _onCreateGoal }: GoalsViewProps) {
-  // TODO: render
-  //   - empty state when goals.length === 0 ("Set a goal to start tracking cleanup.")
-  //   - each goal: a progress bar from goal.progress.percent + goal.progress.label,
-  //     and a "done" state when goal.progress.done. Reuse the meter styling from
-  //     DiskStatusBar for visual consistency (consider extracting a shared meter).
-  //   - a small create-goal form: pick kind (free_amount / stay_above / triage) and
-  //     enter a target/threshold in GB (convert GB -> bytes before calling
-  //     onCreateGoal). Keep it minimal.
   const [kind, setKind] = useState<GoalKind>("free_amount");
   const [gbInput, setGbInput] = useState("");
 
