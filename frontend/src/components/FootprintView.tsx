@@ -18,19 +18,43 @@ interface FootprintViewProps {
 
 export default function FootprintView({ actions, onUndo: _onUndo }: FootprintViewProps) {
   if (actions.length === 0) {
-    // TODO: empty state — "No actions yet. Trash or offload something to see it here."
-    return <section className="footprint-panel empty-state" />;
+
+    return (
+    <section className="footprint-panel empty-state">
+      <p>No actions yet. Trash or offload something to see it here.</p>
+    </section>
+    )
   }
 
-  // TODO: render a row per action:
-  //   - kind (Trash/Offload), path basename, size (formatBytes), status, date
-  //   - an Undo button ONLY when action.status === "done" (pending/failed/undone
-  //     are not undoable). Wire it to _onUndo(action.id).
-  //   - show a clear "undone" state after reversal.
   return (
     <section className="footprint-panel">
       <h2>Activity</h2>
-      {/* TODO: action log rows + per-row Undo */}
+
+      <ul>
+        {actions.map((action) => {
+          const fileName = action.path.split('/').pop() || action.path;
+          const dateString = new Date(action.created_at * 1000).toLocaleDateString();
+          const sizeString = action.size_bytes ? formatBytes(action.size_bytes) : "Unknown size";
+
+          return (
+            <li key={action.id} className="footprint-row">
+              <div className="action-details">
+                <strong>{action.kind.toUpperCase()}</strong>: {fileName} ({sizeString}) on {dateString}
+              </div>
+              
+              <div className="action-controls">
+                {action.status === "done" && (
+                  <button onClick={() => _onUndo(action.id)}>Undo</button>
+                )}
+                {action.status === "undone" && (
+                  <span className="badge">Restored</span>
+                )}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+
     </section>
   );
 }

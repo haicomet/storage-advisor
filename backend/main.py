@@ -65,7 +65,7 @@ def handle_scan(req_id: str, args: dict) -> None:
 
     try:
         start_time = time.time()
-        
+
         # Iterate over the batched results from the scanner
         for batch in scanner.scan_directory(target_path, progress_callback=_progress_cb):
             if batch:
@@ -393,47 +393,51 @@ def handle_list_goals(req_id: str, args: dict) -> None:
 
 def handle_move_to_trash(req_id: str, args: dict) -> None:
     """Handle a `move_to_trash` request: safely trash a file or folder cohort.
-
-    Emits one {type:"result", data:{action_id, status, undo_token}}.
-
-    TODO:
-      - Read path (required -> INVALID_ARGS if missing), is_dir, and optional
-        size_bytes from args.
-      - result = actions.perform_action("trash", path, is_dir, size_bytes=...)
-      - send the result dict. On failure send an error — map a
-        "unsupported platform" / permission failure to a clear code.
-      - This is the app's FIRST destructive action, but it's reversible (Trash),
-        and perform_action records it before touching disk. The UI must confirm
-        before calling this (advise-first stays the default).
     """
-    # TODO: implement
-    raise NotImplementedError
+    path = args.get("path")
+    is_dir = args.get("is_dir", False)
+    size_bytes = args.get("size_bytes")
+    
+    if not path:
+        send({"id": req_id, "type": "error", "error": {"code": "INVALID_ARGS", "message": "path is required"}})
+        return
+
+    try:
+        result = actions.perform_action("trash", path, is_dir, size_bytes=size_bytes)
+        send({"id": req_id, "type": "result", "data": result})
+    except Exception as e:
+        log(f"[move_to_trash] Error: {e}")
+        send({"id": req_id, "type": "error", "error": {"code": "ACTION_ERROR", "message": str(e)}})
 
 
 def handle_undo_action(req_id: str, args: dict) -> None:
     """Handle an `undo_action` request: reverse a completed action.
-
-    Emits one {type:"result", data:{ok: true}}.
-
-    TODO:
-      - Read action_id (required). actions.undo_action(action_id).
-      - Error if the action isn't undoable (not 'done'); send a clear message.
     """
-    # TODO: implement
-    raise NotImplementedError
+    action_id = args.get("action_id")
+    
+    if not action_id:
+        send({"id": req_id, "type": "error", "error": {"code": "INVALID_ARGS", "message": "action_id is required"}})
+        return
+
+    try:
+        actions.undo_action(action_id)
+        send({"id": req_id, "type": "result", "data": {"ok": True}})
+    except Exception as e:
+        log(f"[undo_action] Error: {e}")
+        send({"id": req_id, "type": "error", "error": {"code": "ACTION_ERROR", "message": str(e)}})
 
 
 def handle_list_actions(req_id: str, args: dict) -> None:
     """Handle a `list_actions` request: the footprint log (what the app did).
-
-    Emits one {type:"result", data:{actions: [...]}}.
-
-    TODO:
-      - database.list_actions(args.get("status")); send under `actions`.
-      - Mirror the other query handlers' try/except with QUERY_ERROR.
     """
-    # TODO: implement
-    raise NotImplementedError
+    status = args.get("status")
+
+    try:
+        results = database.list_actions(status)
+        send({"id": req_id, "type": "result", "data": {"actions": results}})
+    except Exception as e:
+        log(f"[list_actions] Error: {e}")
+        send({"id": req_id, "type": "error", "error": {"code": "QUERY_ERROR", "message": str(e)}})
 
 
 # Maps a protocol `cmd` string to its handler.
