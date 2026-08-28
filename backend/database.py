@@ -205,7 +205,7 @@ def list_goals(status: str | None = None) -> list[dict]:
                 cursor = conn.execute(
                     "SELECT * FROM goals ORDER BY created_at DESC"
                 )
-    
+
             return [dict(row) for row in cursor]
 
 
@@ -214,23 +214,32 @@ def list_actions(status: str | None = None) -> list[dict]:
 
     Powers the footprint/undo view. Never pruned, so this is the full history of
     what the app did to the user's files.
-
-    TODO:
-      - SELECT * FROM actions [WHERE status = ?] ORDER BY created_at DESC.
-      - Return list of dicts.
     """
-    # TODO: implement
-    raise NotImplementedError
+    with get_db_connection() as conn:
+        if status:
+            cursor = conn.execute(
+                "SELECT * FROM actions WHERE status = ? ORDER BY created_at DESC",
+                (status,)
+            )
+        else:
+            cursor = conn.execute(
+                            "SELECT * FROM actions ORDER BY created_at DESC",
+                        )
+
+        return [dict(row) for row in cursor]
+
 
 
 def get_action(action_id: int) -> dict | None:
     """Return one action row by id (for undo), or None if absent.
-
-    TODO:
-      - SELECT * FROM actions WHERE id = ?; return dict(row) or None.
     """
-    # TODO: implement
-    raise NotImplementedError
+    with get_db_connection() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM actions WHERE id = ?",
+                (action_id,)
+                )
+            row = cursor.fetchone()
+            return dict(row) if row else None
 
 
 def create_scan(root_path: str, started_at: int) -> int:
