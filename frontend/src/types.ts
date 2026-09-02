@@ -140,9 +140,21 @@ export interface Action {
   undo_token: string | null;
 }
 
-// What move_to_trash returns.
+// What move_to_trash / offload return.
 export interface ActionResult {
   action_id: number;
   status: ActionStatus;
   undo_token: string | null;
+}
+
+// --- Phase 7: offload to external storage -----------------------------------
+
+// A mounted external volume usable as an offload destination.
+// Mirrors volumes.list_volumes() output.
+export interface Volume {
+  name: string;
+  path: string; // mount point under /Volumes
+  free_bytes: number;
+  total_bytes: number;
+  free_human: string; // e.g. "480 GB"
 }

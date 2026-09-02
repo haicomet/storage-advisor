@@ -15,8 +15,9 @@ import DiskStatusBar from "./components/DiskStatusBar";
 import OffloadCandidatesView from "./components/OffloadCandidatesView";
 import GoalsView from "./components/GoalsView";
 import FootprintView from "./components/FootprintView";
-import { topLargeStale, getDiskHistory, getDiskStatus, getLargeFiles, getFolderRollups, listGoals, createGoal, listActions, undoAction } from "./api";
-import type { FileRow, ScanResult, DiskHistoryPoint, DiskStatus, LargeFile, FolderRollup, GoalWithProgress, GoalKind, Action } from "./types";
+import VolumePicker from "./components/VolumePicker";
+import { topLargeStale, getDiskHistory, getDiskStatus, getLargeFiles, getFolderRollups, listGoals, createGoal, listActions, undoAction, listVolumes, offload } from "./api";
+import type { FileRow, ScanResult, DiskHistoryPoint, DiskStatus, LargeFile, FolderRollup, GoalWithProgress, GoalKind, Action, Volume } from "./types";
 import "./App.css";
 
 function App() {
@@ -29,6 +30,9 @@ function App() {
   const [goals, setGoals] = useState<GoalWithProgress[]>([]);
   // Phase 6: the action log (Trash/offload history + undo).
   const [actions, setActions] = useState<Action[]>([]);
+  // Phase 7: external volumes + the chosen offload destination.
+  const [volumes, setVolumes] = useState<Volume[]>([]);
+  const [destPath, setDestPath] = useState<string | null>(null);
   const [hasScanned, setHasScanned] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,6 +53,9 @@ function App() {
 
     // Load the action log on mount (Phase 6 footprint/undo)
     refreshActions();
+
+    // Load external volumes on mount (Phase 7 offload destinations)
+    refreshVolumes();
 
     // Keep the monitor alive by polling every 10 seconds
     const intervalId = setInterval(refreshDiskStatus, 10000);
@@ -91,6 +98,34 @@ function App() {
       await refreshDiskStatus();  // and free space
     } catch (err) {
       console.error("Failed to undo action", err);
+    }
+  }
+
+  async function refreshVolumes() {
+    // Loads mounted external volumes. Guarded — backend list_volumes is a stub.
+    try {
+      setVolumes(await listVolumes());
+    } catch (err) {
+      console.error("Failed to load volumes", err);
+    }
+  }
+
+  async function handleOffload(path: string, isDir: boolean, sizeBytes?: number) {
+    // Moves a file/folder cohort to the selected external volume. The row-level
+    // UI must confirm before calling this (it moves real data).
+    if (!destPath) {
+      setError("Select an offload destination first.");
+      return;
+    }
+    try {
+      await offload(path, isDir, destPath, sizeBytes);
+      // Offload changed the footprint, free space, and reclaimed-toward-goal.
+      await refreshActions();
+      await refreshGoals();
+      await refreshDiskStatus();
+      await refreshVolumes();
+    } catch (err: any) {
+      setError(`Offload failed: ${err.toString()}`);
     }
   }
 
@@ -143,8 +178,17 @@ function App() {
 
       <ScanView onScanComplete={handleScanComplete} />
       <TrendsView points={trends} />
-      {/* Offload candidates (size-led, folders first) — Phase 4.5 */}
-      <OffloadCandidatesView folders={folders} files={largeFiles} />
+
+      {/* Offload destination picker — Phase 7 */}
+      <VolumePicker
+        volumes={volumes}
+        selectedPath={destPath}
+        onSelect={setDestPath}
+        onRefresh={refreshVolumes}
+      />
+      {/* Offload candidates (size-led, folders first) — Phase 4.5.
+          onOffload is wired; per-row Offload buttons remain (task #43). */}
+      <OffloadCandidatesView folders={folders} files={largeFiles} onOffload={handleOffload} />
       {/* Large & Stale (deletion-oriented) */}
       <ResultsTable items={_results} hasScanned={hasScanned} />
     </main>

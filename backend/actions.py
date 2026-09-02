@@ -37,7 +37,9 @@ def perform_action(kind: str, path: str, is_dir: bool, *,
         if kind == "trash":
           undo_token = move_to_trash(path)
         elif kind == "offload":
-          raise NotImplementedError("Offload coming in Phase 7")
+          if not dest_path:
+            raise ValueError("offload requires a dest_path")
+          undo_token = offload_to_volume(path, dest_path)
         else:
           raise ValueError(f"Unknown action kind: {kind}")
 
@@ -73,6 +75,42 @@ def move_to_trash(path: str) -> str:
     return new_url.path()
 
 
+def offload_to_volume(src: str, dest_dir: str) -> str:
+    """Move `src` (file OR folder cohort) to an external volume. Return an undo token.
+
+    A cross-volume move is NOT atomic, so this is copy → verify → delete-original,
+    NEVER a blind move (DESIGN.md §6). The original is removed only after the
+    destination copy is proven good — so an interrupted offload leaves the
+    original intact.
+
+    Returns the destination path (the undo_token: where it now lives, so
+    undo_action can move it back).
+
+    TODO:
+      1. Compute dest = os.path.join(dest_dir, os.path.basename(src)). Refuse if
+         dest already exists (don't clobber).
+      2. PRE-CHECK (safety prerequisites — see reconciliation helpers):
+           - skip/refuse iCloud dataless placeholders (copying triggers a download).
+           - if src shares an inode with another kept file (clone/hardlink),
+             offloading frees nothing — surface that rather than proceed silently.
+           - confirm the volume has enough free space for the cohort.
+      3. COPY: shutil.copytree(src, dest) for a dir, shutil.copy2 for a file
+         (copy2 preserves mtime — keeps staleness signals meaningful).
+      4. VERIFY before deleting: compare total size, and checksum
+         (hash the bytes) — the copy must match the source. If verification
+         FAILS, delete the partial dest and raise; the original is untouched.
+      5. DELETE ORIGINAL only now — via move_to_trash(src), NOT rm, so even the
+         "original" removal is reversible. (Trash the source; the offloaded copy
+         is the primary now.)
+      6. Return dest as the undo_token.
+    Disconnect handling: if the volume vanishes mid-copy, the copy raises; the
+    original was never touched, so perform_action marks the row 'failed' and the
+    file is safe. Never delete the original outside the verified path.
+    """
+    # TODO: implement
+    raise NotImplementedError
+
+
 def undo_action(action_id: int) -> None:
     """Reverse a completed action using its recorded undo_token.
     """
@@ -88,7 +126,14 @@ def undo_action(action_id: int) -> None:
     if action["kind"] == "trash":
         shutil.move(action["undo_token"], action["path"])
     elif action["kind"] == "offload":
-        raise NotImplementedError("Offload undo coming in Phase 7")
+        # Move the offloaded copy back from the external volume to the original
+        # path. undo_token is the destination path where it now lives.
+        # TODO:
+        #   - copy dest (undo_token) back to action["path"], verify, then remove
+        #     the copy from the external volume. Mirror the copy→verify→delete
+        #     discipline in reverse so an interrupted undo never loses the file.
+        #   - refuse if action["path"] already exists (something recreated it).
+        raise NotImplementedError("Offload undo — implement in Phase 7")
     else:
         raise ValueError(f"Unknown action kind for undo: {action['kind']}")
 

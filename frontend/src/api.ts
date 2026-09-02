@@ -9,7 +9,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { FileRow, ScanProgress, ScanResult, TrendPoint, DiskStatus, DiskHistoryPoint, LargeFile, FolderRollup, TriageItem, TriageDecision, GoalKind, GoalWithProgress, Action, ActionResult } from "./types";
+import type { FileRow, ScanProgress, ScanResult, TrendPoint, DiskStatus, DiskHistoryPoint, LargeFile, FolderRollup, TriageItem, TriageDecision, GoalKind, GoalWithProgress, Action, ActionResult, Volume } from "./types";
 
 /**
  * Start a scan, receiving streamed progress via `onProgress`.
@@ -157,4 +157,20 @@ export async function undoAction(actionId: number): Promise<void> {
 export async function listActions(status?: string): Promise<Action[]> {
   const response = await invoke<{ actions: Action[] }>("list_actions", { status });
   return response.actions.map(a => ({ ...a, is_dir: Boolean(a.is_dir) }));
+}
+
+// --- Phase 7: offload to external storage -----------------------------------
+
+/** External volumes currently mounted, usable as offload destinations. */
+export async function listVolumes(): Promise<Volume[]> {
+  const response = await invoke<{ volumes: Volume[] }>("list_volumes");
+  return response.volumes;
+}
+
+/**
+ * Offload a file or folder cohort to an external volume (copy → verify → trash
+ * original; reversible). Confirm in the UI first — this moves real data.
+ */
+export async function offload(path: string, isDir: boolean, destPath: string, sizeBytes?: number): Promise<ActionResult> {
+  return await invoke<ActionResult>("offload", { path, isDir, destPath, sizeBytes: sizeBytes ?? null });
 }

@@ -25,6 +25,7 @@ from . import scanner
 from . import analyzer
 from . import disk
 from . import actions
+from . import volumes
 
 # NOTE: keep imports package-relative so `python -m backend.main` works from the
 # repo root (same fix tracked for scan_cli). e.g. from .analyzer import ...
@@ -440,6 +441,40 @@ def handle_list_actions(req_id: str, args: dict) -> None:
         send({"id": req_id, "type": "error", "error": {"code": "QUERY_ERROR", "message": str(e)}})
 
 
+def handle_list_volumes(req_id: str, args: dict) -> None:
+    """Handle a `list_volumes` request: external volumes usable as offload targets.
+
+    Emits one {type:"result", data:{volumes: [...]}}.
+
+    TODO:
+      - volumes.list_volumes(); send under `volumes`. Cheap live read (no scan).
+      - QUERY_ERROR on failure like the other read handlers.
+    """
+    # TODO: implement
+    raise NotImplementedError
+
+
+def handle_offload(req_id: str, args: dict) -> None:
+    """Handle an `offload` request: move a file/folder cohort to an external volume.
+
+    Emits one {type:"result", data:{action_id, status, undo_token}}.
+
+    TODO:
+      - Read path (required), is_dir, dest_path (required -> INVALID_ARGS if
+        missing), optional size_bytes.
+      - result = actions.perform_action("offload", path, is_dir,
+          dest_path=dest_path, size_bytes=size_bytes); send it.
+      - On failure send an error (map disconnect / not-enough-space / dataless /
+        clone-frees-nothing to clear codes). The original is safe on failure
+        because perform_action never deletes before the copy verifies.
+      - Consider streaming progress for a large cohort copy (like handle_scan);
+        note it here even if the first pass is synchronous.
+      - The UI must confirm before calling this (it moves real data).
+    """
+    # TODO: implement
+    raise NotImplementedError
+
+
 # Maps a protocol `cmd` string to its handler.
 COMMANDS = {
     "scan": handle_scan,
@@ -456,6 +491,8 @@ COMMANDS = {
     "move_to_trash": handle_move_to_trash,
     "undo_action": handle_undo_action,
     "list_actions": handle_list_actions,
+    "list_volumes": handle_list_volumes,
+    "offload": handle_offload,
 }
 
 
