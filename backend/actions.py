@@ -19,7 +19,6 @@ by construction). This module must not contain an unlink/rmtree of user data.
 import time
 import sys
 import shutil
-from Foundation import NSFileManager, NSURL
 from . import database
 
 
@@ -59,6 +58,8 @@ def move_to_trash(path: str) -> str:
     if sys.platform != "darwin":
       raise RuntimeError("Safe delete is only supported on macOS.")
 
+    from Foundation import NSFileManager, NSURL
+
     file_url = NSURL.fileURLWithPath_(path)
     manager = NSFileManager.defaultManager()
 
@@ -78,10 +79,18 @@ def undo_action(action_id: int) -> None:
 
     action = database.get_action(action_id)
 
+    if action is None:
+        raise ValueError(f"No action found with id {action_id}")
+
     if action["status"] != "done":
       raise ValueError("Only 'done' actions can be undone.")
 
-    shutil.move(action["undo_token"], action["path"])
+    if action["kind"] == "trash":
+        shutil.move(action["undo_token"], action["path"])
+    elif action["kind"] == "offload":
+        raise NotImplementedError("Offload undo coming in Phase 7")
+    else:
+        raise ValueError(f"Unknown action kind for undo: {action['kind']}")
 
     database.complete_action(action_id, status="undone", completed_at=int(time.time()))
 

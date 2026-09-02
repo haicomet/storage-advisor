@@ -10,3 +10,4 @@
 # Pins use `~=` (compatible-release): patch/minor updates allowed, majors held.
 
 pytest~=8.2
+pyobjc-framework-Cocoa==12.2.2
