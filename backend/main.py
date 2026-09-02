@@ -398,7 +398,7 @@ def handle_move_to_trash(req_id: str, args: dict) -> None:
     is_dir = args.get("is_dir", False)
     size_bytes = args.get("size_bytes")
     
-    if not path:
+    if path is None:
         send({"id": req_id, "type": "error", "error": {"code": "INVALID_ARGS", "message": "path is required"}})
         return
 
@@ -415,7 +415,7 @@ def handle_undo_action(req_id: str, args: dict) -> None:
     """
     action_id = args.get("action_id")
     
-    if not action_id:
+    if action_id is None:
         send({"id": req_id, "type": "error", "error": {"code": "INVALID_ARGS", "message": "action_id is required"}})
         return
 
