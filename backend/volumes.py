@@ -6,7 +6,10 @@ finds candidate destinations — mounted volumes that are NOT the startup disk �
 so the UI can offer a place to move things to.
 """
 
+import os
+import sys
 import shutil
+import analyzer
 
 # macOS mounts non-boot volumes under /Volumes. The boot disk also appears here
 # as a symlink/entry, so it must be excluded as a destination.
@@ -15,22 +18,49 @@ VOLUMES_ROOT = "/Volumes"
 
 def list_volumes() -> list[dict]:
     """Return mounted external volumes available as offload destinations.
-
-    Each dict: {name, path, free_bytes, total_bytes, free_human}.
-
-    TODO:
-      - Enumerate entries under /Volumes (os.scandir). For each, skip:
-          * the startup/boot volume (resolve which /Volumes entry is `/` — e.g.
-            compare os.stat(entry).st_dev to os.stat("/").st_dev and exclude the
-            match) — never offer the boot disk as a destination.
-          * anything not a real mount (broken symlinks, unreadable).
-      - For each remaining volume, shutil.disk_usage(path) -> free/total; reuse
-        analyzer._human_size (or a shared formatter) for free_human.
-      - Return [] when nothing external is mounted (UI shows "connect a drive").
-    Non-macOS: fine to return [] (offload is a macOS feature); don't raise here.
-    Design note: only volumes with enough free space to hold a given cohort are
-    valid targets — the *filtering* by required size happens at offload time,
-    not here; this just lists what's connected.
     """
-    # TODO: implement
-    raise NotImplementedError
+
+    if sys.platform != "darwin":
+      return []
+
+    if not os.path.exists(VOLUMES_ROOT):
+        return []
+
+    try:
+        boot_dev = os.stat("/").st_dev
+    except OSError:
+        boot_dev = None
+
+    results = []
+
+    try:
+        for entry in os.scandir(VOLUMES_ROOT):
+          #skip hidden files
+          if entry.name.startswith("."):
+            continue
+
+          try:
+              stat_info = os.stat(entry.path)
+
+              if boot_dev is not None and stat_info.st_dev == boot_dev:
+                  continue
+
+              usage = shutil.disk_usage(entry.path)
+
+              results.append({
+                  "name": entry.name,
+                  "path": entry.path,
+                  "free_bytes": usage.free,
+                  "total_bytes": usage.total,
+                  "free_human": analyzer._human_size(usage.free)
+              })
+          except OSError:
+            continue
+
+    except OSError:
+      pass
+
+    return results
+
+
+
