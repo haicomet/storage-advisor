@@ -355,6 +355,46 @@ def goal_progress(conn: sqlite3.Connection, goal: dict, *, now: int | None = Non
         raise ValueError
 
 
+def reclaimable_bytes(conn: sqlite3.Connection, paths: list[str], *,
+                      scan_id: int | None = None) -> int:
+    """Return the TRUE bytes freed by removing `paths`, reconciling shared inodes.
+
+    Two files that share an inode (APFS clone / hardlink) occupy the storage
+    ONCE. If both are in `paths`, their bytes must be counted once; if a file in
+    `paths` shares its inode with a file that is being KEPT, removing it frees
+    nothing. This is the "never overstate reclaimable space" rule (DESIGN.md §6)
+    — the credibility-critical number.
+
+    TODO:
+      - Resolve scan_id (latest if None).
+      - For the files under `paths`, group by inode. Count each inode's size at
+        most once. Subtract any inode that is ALSO referenced by a file NOT in
+        `paths` (a kept file) — removing a clone whose twin stays frees 0.
+      - Return the reconciled total (<= naive sum of sizes).
+    Use this before showing any "you'll free X" figure for a selection; do NOT
+    naively sum file/folder sizes.
+    """
+    # TODO: implement
+    raise NotImplementedError
+
+
+def is_dataless(filepath: str) -> bool:
+    """True if `filepath` is an iCloud dataless placeholder (not really on disk).
+
+    Copying or reading a placeholder triggers a download — the OPPOSITE of
+    freeing space — so offload must detect and skip these (DESIGN.md §6).
+
+    TODO:
+      - Check the file's macOS flags for SF_DATALESS (0x40000000) via
+        os.stat(filepath).st_flags & SF_DATALESS, guarded for platforms without
+        st_flags. Return False when the attribute is unavailable (best-effort).
+      - This is a per-file check the offload pre-flight calls; the scanner may
+        also use it to flag/skip placeholders during ingestion.
+    """
+    # TODO: implement
+    raise NotImplementedError
+
+
 def _human_size(size_bytes: int) -> str:
     """Format a byte count as a short human string (e.g. 4509715660 -> "4.2 GB")."""
 

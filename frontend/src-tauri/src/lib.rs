@@ -233,6 +233,25 @@ async fn list_actions(status: Option<String>, state: State<'_, SidecarState>) ->
     send_request("list_actions", json!({ "status": status }), state)
 }
 
+// --- Phase 7: offload to external storage ------------------------------------
+
+#[tauri::command]
+async fn list_volumes(state: State<'_, SidecarState>) -> Result<Value, String> {
+    // External volumes available as offload destinations. Cheap live read.
+    send_request("list_volumes", json!({}), state)
+}
+
+#[tauri::command]
+async fn offload(path: String, is_dir: bool, dest_path: String, size_bytes: Option<u64>, state: State<'_, SidecarState>) -> Result<Value, String> {
+    // Move a file/folder cohort to an external volume (copy -> verify -> trash
+    // original). Reversible. The UI must confirm before invoking this.
+    send_request(
+        "offload",
+        json!({ "path": path, "is_dir": is_dir, "dest_path": dest_path, "size_bytes": size_bytes }),
+        state,
+    )
+}
+
 #[tauri::command]
 fn reveal_in_finder(filepath: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
@@ -283,6 +302,8 @@ pub fn run() {
             move_to_trash,
             undo_action,
             list_actions,
+            list_volumes,
+            offload,
             reveal_in_finder
         ])
         .run(tauri::generate_context!())

@@ -16,9 +16,16 @@ import { revealInFinder } from "../api";
 interface OffloadCandidatesViewProps {
   folders: FolderRollup[]; // recursive-size cohorts, ranked by total_bytes
   files: LargeFile[];      // largest individual files, ranked by size
+  // Phase 7: offload a row to the chosen destination. Optional until the
+  // per-row Offload buttons are wired (task #43). App provides the handler.
+  onOffload?: (path: string, isDir: boolean, sizeBytes?: number) => void;
 }
 
-export default function OffloadCandidatesView({ folders, files }: OffloadCandidatesViewProps) {
+export default function OffloadCandidatesView({ folders, files, onOffload: _onOffload }: OffloadCandidatesViewProps) {
+  // TODO (task #43): add an "Offload" button next to each folder/file row that
+  //   calls _onOffload(path, isDir, sizeBytes) — with a confirm step, since it
+  //   moves real data. Folders: (folder.path, true, folder.total_bytes); files:
+  //   (file.filepath, false, file.size_bytes). Advise-first stays the default.
   if (folders.length === 0 && files.length === 0) {
     return (
       <section className="offload-panel empty-state" >
