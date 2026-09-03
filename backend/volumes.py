@@ -9,7 +9,7 @@ so the UI can offer a place to move things to.
 import os
 import sys
 import shutil
-import analyzer
+from . import analyzer
 
 # macOS mounts non-boot volumes under /Volumes. The boot disk also appears here
 # as a symlink/entry, so it must be excluded as a destination.

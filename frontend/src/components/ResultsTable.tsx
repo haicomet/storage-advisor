@@ -13,9 +13,12 @@ import { revealInFinder } from "../api";
 interface ResultsTableProps {
   items: FileRow[];
   hasScanned: boolean;
+  // Phase 6: move a large-&-stale file to the Trash (reversible via Undo).
+  // Optional; App provides the handler. Confirmed before it fires.
+  onTrash?: (path: string, isDir: boolean, sizeBytes?: number) => void;
 }
 
-export default function ResultsTable({ items, hasScanned }: ResultsTableProps) {
+export default function ResultsTable({ items, hasScanned, onTrash }: ResultsTableProps) {
 
   if (items.length === 0) {
     return (
@@ -49,10 +52,9 @@ export default function ResultsTable({ items, hasScanned }: ResultsTableProps) {
               <td className="evidence-col">{item.evidence}</td>
               
               <td>
-                <button 
+                <button
                   onClick={async () => {
                     try {
-                      console.log("Attempting to reveal:", item.filepath);
                       await revealInFinder(item.filepath);
                     } catch (err) {
                       alert(`Could not reveal file:\n${err}`);
@@ -61,6 +63,18 @@ export default function ResultsTable({ items, hasScanned }: ResultsTableProps) {
                 >
                   Reveal
                 </button>
+                {onTrash && (
+                  <button
+                    onClick={() => {
+                      const name = item.filepath.split("/").pop();
+                      if (window.confirm(`Move this file to the Trash?\n\n${name}\n\nYou can undo this from Activity.`)) {
+                        onTrash(item.filepath, false, item.size_bytes);
+                      }
+                    }}
+                  >
+                    Move to Trash
+                  </button>
+                )}
               </td>
             </tr>
           ))}

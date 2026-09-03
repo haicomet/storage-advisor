@@ -24,17 +24,38 @@ import filecmp
 from . import database
 from . import analyzer
 
-def _get_size(path: str) -> int:
-    """helper: recursively calculate the total size of a file or folder in bytes"""
-    if os.path.isfile(path):
-        return os.path.getsize(path)
-    total = 0
-    for dirpath, _, filenames in os.walk(path):
+def _relative_file_sizes(root: str) -> dict:
+    """Map {relative_path: size} for regular (non-symlink) files under `root`.
+
+    Symlinks are skipped so verification is consistent on both src and dest
+    regardless of how the copy handled links.
+    """
+    sizes = {}
+    for dirpath, _, filenames in os.walk(root):
         for f in filenames:
             fp = os.path.join(dirpath, f)
-            if not os.path.islink(fp):
-                total += os.path.getsize(fp)
-    return total
+            if os.path.islink(fp):
+                continue
+            sizes[os.path.relpath(fp, root)] = os.path.getsize(fp)
+    return sizes
+
+
+def _verify_copy(src: str, dest: str, is_dir: bool) -> bool:
+    """True if `dest` faithfully reproduces `src`.
+
+    Files: full byte comparison (filecmp shallow=False). Directories: the SAME
+    set of files by relative path, each with a matching size — not just an equal
+    total, so two different corrupt trees of equal total size cannot pass. This
+    is the data-loss-critical gate, so it errs toward strictness.
+
+    (A stricter variant would byte-compare every file in the tree; size+file-set
+    is the chosen balance for large cohorts. Upgrade to per-file checksums if a
+    cohort's contents must be guaranteed identical byte-for-byte.)
+    """
+    if not is_dir:
+        return filecmp.cmp(src, dest, shallow=False)
+    return _relative_file_sizes(src) == _relative_file_sizes(dest)
+
 
 def perform_action(kind: str, path: str, is_dir: bool, *,
                    dest_path: str | None = None, size_bytes: int | None = None,
@@ -113,12 +134,8 @@ def offload_to_volume(src: str, dest_dir: str) -> str:
     else:
       shutil.copy2(src, dest)
 
-    verified = False
-    #verify
-    if is_dir:
-       verified = (_get_size(src) == _get_size(dest))
-    else:
-       verified = filecmp.cmp(src, dest, shallow=False)
+    # verify the copy faithfully reproduces the source BEFORE removing anything
+    verified = _verify_copy(src, dest, is_dir)
 
     #commit or rollback
     if verified:
@@ -160,11 +177,7 @@ def undo_action(action_id: int) -> None:
         else:
             shutil.copy2(src, dest)
 
-        verified = False
-        if is_dir:
-            verified = (_get_size(src) == _get_size(dest))
-        else:
-            verified = filecmp.cmp(src, dest, shallow=False)
+        verified = _verify_copy(src, dest, is_dir)
 
         if verified:
             move_to_trash(src)

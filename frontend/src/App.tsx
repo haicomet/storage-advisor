@@ -16,7 +16,7 @@ import OffloadCandidatesView from "./components/OffloadCandidatesView";
 import GoalsView from "./components/GoalsView";
 import FootprintView from "./components/FootprintView";
 import VolumePicker from "./components/VolumePicker";
-import { topLargeStale, getDiskHistory, getDiskStatus, getLargeFiles, getFolderRollups, listGoals, createGoal, listActions, undoAction, listVolumes, offload } from "./api";
+import { topLargeStale, getDiskHistory, getDiskStatus, getLargeFiles, getFolderRollups, listGoals, createGoal, listActions, undoAction, listVolumes, offload, moveToTrash } from "./api";
 import type { FileRow, ScanResult, DiskHistoryPoint, DiskStatus, LargeFile, FolderRollup, GoalWithProgress, GoalKind, Action, Volume } from "./types";
 import "./App.css";
 
@@ -129,6 +129,20 @@ function App() {
     }
   }
 
+  async function handleTrash(path: string, isDir: boolean, sizeBytes?: number) {
+    // Move to the macOS Trash (reversible via the footprint's Undo). The row-level
+    // UI confirms before calling this.
+    try {
+      await moveToTrash(path, isDir, sizeBytes);
+      // Trashing changed the footprint, free space, and reclaimed-toward-goal.
+      await refreshActions();
+      await refreshGoals();
+      await refreshDiskStatus();
+    } catch (err: any) {
+      setError(`Move to Trash failed: ${err.toString()}`);
+    }
+  }
+
   async function refreshDiskStatus() {
     try {
       const status = await getDiskStatus();
@@ -190,7 +204,7 @@ function App() {
           onOffload is wired; per-row Offload buttons remain (task #43). */}
       <OffloadCandidatesView folders={folders} files={largeFiles} onOffload={handleOffload} />
       {/* Large & Stale (deletion-oriented) */}
-      <ResultsTable items={_results} hasScanned={hasScanned} />
+      <ResultsTable items={_results} hasScanned={hasScanned} onTrash={handleTrash} />
     </main>
   );
 }
