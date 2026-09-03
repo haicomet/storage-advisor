@@ -443,36 +443,56 @@ def handle_list_actions(req_id: str, args: dict) -> None:
 
 def handle_list_volumes(req_id: str, args: dict) -> None:
     """Handle a `list_volumes` request: external volumes usable as offload targets.
-
-    Emits one {type:"result", data:{volumes: [...]}}.
-
-    TODO:
-      - volumes.list_volumes(); send under `volumes`. Cheap live read (no scan).
-      - QUERY_ERROR on failure like the other read handlers.
     """
-    # TODO: implement
-    raise NotImplementedError
+    log("[list_volumes] Fetching external volumes...")
+    try:
+        results = volumes.list_volumes()
+        send({
+            "id": req_id,
+            "type": "result",
+            "data": {"volumes": results}
+        })
+    except Exception as e:
+        log(f"[list_volumes] Error: {e}")
+        send({
+            "id": req_id,
+            "type": "error",
+            "error": {"code": "QUERY_ERROR", "message": str(e)}
+        })
 
 
 def handle_offload(req_id: str, args: dict) -> None:
     """Handle an `offload` request: move a file/folder cohort to an external volume.
-
-    Emits one {type:"result", data:{action_id, status, undo_token}}.
-
-    TODO:
-      - Read path (required), is_dir, dest_path (required -> INVALID_ARGS if
-        missing), optional size_bytes.
-      - result = actions.perform_action("offload", path, is_dir,
-          dest_path=dest_path, size_bytes=size_bytes); send it.
-      - On failure send an error (map disconnect / not-enough-space / dataless /
-        clone-frees-nothing to clear codes). The original is safe on failure
-        because perform_action never deletes before the copy verifies.
-      - Consider streaming progress for a large cohort copy (like handle_scan);
-        note it here even if the first pass is synchronous.
-      - The UI must confirm before calling this (it moves real data).
     """
-    # TODO: implement
-    raise NotImplementedError
+    path = args.get("path")
+    is_dir = args.get("is_dir", False)
+    dest_path = args.get("dest_path")
+    size_bytes = args.get("size_bytes")
+
+    if path is None or dest_path is None:
+        send({
+            "id": req_id, 
+            "type": "error", 
+            "error": {"code": "INVALID_ARGS", "message": "path and dest_path are required"}
+        })
+        return
+
+    try:
+        result = actions.perform_action(
+            "offload", 
+            path, 
+            is_dir, 
+            dest_path=dest_path, 
+            size_bytes=size_bytes
+        )
+        send({"id": req_id, "type": "result", "data": result})
+    except Exception as e:
+        log(f"[offload] Error: {e}")
+        send({
+            "id": req_id, 
+            "type": "error", 
+            "error": {"code": "ACTION_ERROR", "message": str(e)}
+        })
 
 
 # Maps a protocol `cmd` string to its handler.
