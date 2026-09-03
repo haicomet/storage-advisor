@@ -415,7 +415,7 @@ def handle_undo_action(req_id: str, args: dict) -> None:
     """Handle an `undo_action` request: reverse a completed action.
     """
     action_id = args.get("action_id")
-    
+
     if action_id is None:
         send({"id": req_id, "type": "error", "error": {"code": "INVALID_ARGS", "message": "action_id is required"}})
         return

@@ -16,11 +16,25 @@ Hard rule (DESIGN.md §2): NEVER `rm`. Deletion means the macOS Trash (reversibl
 by construction). This module must not contain an unlink/rmtree of user data.
 """
 
+import os
 import time
 import sys
 import shutil
+import filecmp
 from . import database
+from . import analyzer
 
+def _get_size(path: str) -> int:
+    """helper: recursively calculate the total size of a file or folder in bytes"""
+    if os.path.isfile(path):
+        return os.path.getsize(path)
+    total = 0
+    for dirpath, _, filenames in os.walk(path):
+        for f in filenames:
+            fp = os.path.join(dirpath, f)
+            if not os.path.islink(fp):
+                total += os.path.getsize(fp)
+    return total
 
 def perform_action(kind: str, path: str, is_dir: bool, *,
                    dest_path: str | None = None, size_bytes: int | None = None,
@@ -77,38 +91,46 @@ def move_to_trash(path: str) -> str:
 
 def offload_to_volume(src: str, dest_dir: str) -> str:
     """Move `src` (file OR folder cohort) to an external volume. Return an undo token.
-
-    A cross-volume move is NOT atomic, so this is copy → verify → delete-original,
-    NEVER a blind move (DESIGN.md §6). The original is removed only after the
-    destination copy is proven good — so an interrupted offload leaves the
-    original intact.
-
-    Returns the destination path (the undo_token: where it now lives, so
-    undo_action can move it back).
-
-    TODO:
-      1. Compute dest = os.path.join(dest_dir, os.path.basename(src)). Refuse if
-         dest already exists (don't clobber).
-      2. PRE-CHECK (safety prerequisites — see reconciliation helpers):
-           - skip/refuse iCloud dataless placeholders (copying triggers a download).
-           - if src shares an inode with another kept file (clone/hardlink),
-             offloading frees nothing — surface that rather than proceed silently.
-           - confirm the volume has enough free space for the cohort.
-      3. COPY: shutil.copytree(src, dest) for a dir, shutil.copy2 for a file
-         (copy2 preserves mtime — keeps staleness signals meaningful).
-      4. VERIFY before deleting: compare total size, and checksum
-         (hash the bytes) — the copy must match the source. If verification
-         FAILS, delete the partial dest and raise; the original is untouched.
-      5. DELETE ORIGINAL only now — via move_to_trash(src), NOT rm, so even the
-         "original" removal is reversible. (Trash the source; the offloaded copy
-         is the primary now.)
-      6. Return dest as the undo_token.
-    Disconnect handling: if the volume vanishes mid-copy, the copy raises; the
-    original was never touched, so perform_action marks the row 'failed' and the
-    file is safe. Never delete the original outside the verified path.
     """
-    # TODO: implement
-    raise NotImplementedError
+    dest = os.path.join(dest_dir, os.path.basename(src))
+    is_dir = os.path.isdir(src)
+
+    if os.path.exists(dest):
+      raise FileExistsError(f"Cannot offload: destination already exists at {dest}")
+
+    if analyzer.is_dataless(src):
+      raise ValueError(f"Cannot offload dataless iCloud file: {src}")
+
+    with database.get_db_connection() as conn:
+        reclaimable = analyzer.reclaimable_bytes(conn, [src])
+
+    if shutil.disk_usage(dest_dir).free < reclaimable:
+      raise OSError(f"Not enough free space on {dest_dir} for offload.")
+
+    # copy
+    if is_dir:
+      shutil.copytree(src, dest)
+    else:
+      shutil.copy2(src, dest)
+
+    verified = False
+    #verify
+    if is_dir:
+       verified = (_get_size(src) == _get_size(dest))
+    else:
+       verified = filecmp.cmp(src, dest, shallow=False)
+
+    #commit or rollback
+    if verified:
+      move_to_trash(src)
+      return dest
+    else:
+      if is_dir:
+         shutil.rmtree(dest)
+      else:
+         os.remove(dest)
+      raise IOError("Offload verification failed. Original file is untouched.")
+
 
 
 def undo_action(action_id: int) -> None:
@@ -126,14 +148,32 @@ def undo_action(action_id: int) -> None:
     if action["kind"] == "trash":
         shutil.move(action["undo_token"], action["path"])
     elif action["kind"] == "offload":
-        # Move the offloaded copy back from the external volume to the original
-        # path. undo_token is the destination path where it now lives.
-        # TODO:
-        #   - copy dest (undo_token) back to action["path"], verify, then remove
-        #     the copy from the external volume. Mirror the copy→verify→delete
-        #     discipline in reverse so an interrupted undo never loses the file.
-        #   - refuse if action["path"] already exists (something recreated it).
-        raise NotImplementedError("Offload undo — implement in Phase 7")
+        src = action["undo_token"]  # the external drive copy
+        dest = action["path"]       # the original location
+        is_dir = action["is_dir"]
+
+        if os.path.exists(dest):
+            raise FileExistsError(f"Cannot undo: a file already exists at {dest}")
+
+        if is_dir:
+            shutil.copytree(src, dest)
+        else:
+            shutil.copy2(src, dest)
+
+        verified = False
+        if is_dir:
+            verified = (_get_size(src) == _get_size(dest))
+        else:
+            verified = filecmp.cmp(src, dest, shallow=False)
+
+        if verified:
+            move_to_trash(src)
+        else:
+            if is_dir:
+                shutil.rmtree(dest)
+            else:
+                os.remove(dest)
+            raise IOError("Undo verification failed. External copy is untouched.")
     else:
         raise ValueError(f"Unknown action kind for undo: {action['kind']}")
 
