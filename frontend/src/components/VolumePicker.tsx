@@ -16,24 +16,34 @@ interface VolumePickerProps {
   onRefresh: () => void; // re-scan for drives (user just plugged one in)
 }
 
-export default function VolumePicker({ volumes, selectedPath, onSelect: _onSelect, onRefresh: _onRefresh }: VolumePickerProps) {
+export default function VolumePicker({ volumes, selectedPath, onSelect: onSelect, onRefresh: onRefresh }: VolumePickerProps) {
   if (volumes.length === 0) {
-    // TODO: "No external drives connected. Plug one in and Refresh." + a Refresh
-    //   button wired to onRefresh (a drive may be connected after launch).
-    return <section className="volume-picker empty-state" />;
+    return (
+      <section className="volume-picker empty-state">
+        <p>No external drives connected. Plug one in and refresh.</p>
+        <button onClick={onRefresh}>Refresh Drives</button>
+      </section>
+    );
   }
 
-  // TODO: render
-  //   - a selectable list/dropdown of volumes: name · free_human free
-  //   - highlight the selectedPath; call onSelect(volume.path) on click
-  //   - a Refresh control (onRefresh)
-  //   - the selected volume is passed to api.offload as destPath. Whether a
-  //     given cohort FITS is enforced at offload time (backend), but showing
-  //     free_human here helps the user pick.
   return (
     <section className="volume-picker">
       <h3>Offload destination</h3>
-      {/* TODO: volume list + selection + refresh */}
+      <div className="picker-controls" style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+        <select 
+          value={selectedPath || ""} 
+          onChange={(e) => onSelect(e.target.value)}
+        >
+          <option value="" disabled>Select a drive...</option>
+          {volumes.map((vol) => (
+            <option key={vol.path} value={vol.path}>
+              {vol.name} · {vol.free_human} free
+            </option>
+          ))}
+        </select>
+        
+        <button onClick={onRefresh}>Refresh</button>
+      </div>
     </section>
   );
 }

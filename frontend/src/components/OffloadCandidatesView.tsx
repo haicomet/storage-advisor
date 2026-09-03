@@ -21,15 +21,12 @@ interface OffloadCandidatesViewProps {
   onOffload?: (path: string, isDir: boolean, sizeBytes?: number) => void;
 }
 
-export default function OffloadCandidatesView({ folders, files, onOffload: _onOffload }: OffloadCandidatesViewProps) {
-  // TODO (task #43): add an "Offload" button next to each folder/file row that
-  //   calls _onOffload(path, isDir, sizeBytes) — with a confirm step, since it
-  //   moves real data. Folders: (folder.path, true, folder.total_bytes); files:
-  //   (file.filepath, false, file.size_bytes). Advise-first stays the default.
+export default function OffloadCandidatesView({ folders, files, onOffload: onOffload }: OffloadCandidatesViewProps) {
+
   if (folders.length === 0 && files.length === 0) {
     return (
       <section className="offload-panel empty-state" >
-        <p>"Run a scan to find things to offload."</p>
+        <p>Run a scan to find things to offload.</p>
       </section>
       );
   }
@@ -49,10 +46,24 @@ export default function OffloadCandidatesView({ folders, files, onOffload: _onOf
 
             return (
               <li key={folder.path}>
-                <strong>{basename}</strong> - {filepath} · {folder.total_human} · {folder.file_count}
-                <button onClick={() => revealInFinder(filepath)}>Reveal</button>
+                <strong>{basename}</strong> - {filepath} · {folder.total_human} · {folder.file_count} files
+                
+                <div className="action-controls" style={{ display: 'inline-block', marginLeft: '1rem' }}>
+                  <button onClick={() => revealInFinder(filepath)}>Reveal</button>
+                  {onOffload && (
+                    <button 
+                      onClick={() => {
+                        if (window.confirm(`Are you sure you want to offload this folder to the external drive?\n\n${basename}`)) {
+                          onOffload(filepath, true, folder.total_bytes);
+                        }
+                      }}
+                    >
+                      Offload
+                    </button>
+                  )}
+                </div>
               </li>
-            )
+            );
           })}
         </ul>
       </div>
@@ -68,9 +79,23 @@ export default function OffloadCandidatesView({ folders, files, onOffload: _onOf
             return (
               <li key={file.filepath}>
                 <strong>{basename}</strong> - {filepath} · {file.size_human}
-                <button onClick={() => revealInFinder(filepath)}>Reveal</button>
+                
+                <div className="action-controls" style={{ display: 'inline-block', marginLeft: '1rem' }}>
+                  <button onClick={() => revealInFinder(filepath)}>Reveal</button>
+                  {onOffload && (
+                    <button 
+                      onClick={() => {
+                        if (window.confirm(`Are you sure you want to offload this file to the external drive?\n\n${basename}`)) {
+                          onOffload(filepath, false, file.size_bytes);
+                        }
+                      }}
+                    >
+                      Offload
+                    </button>
+                  )}
+                </div>
               </li>
-            )
+            );
           })}
         </ul>
       </div>
